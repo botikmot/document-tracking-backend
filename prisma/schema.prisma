@@ -1,0 +1,238 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum RouteStatus {
+  PENDING
+  RECEIVED
+  RETURNED
+  COMPLETED
+}
+
+enum OrganizationType {
+  REGIONAL
+  PENRO
+  CENRO
+}
+
+model User {
+  id           String     @id @default(uuid())
+  employeeId   String?    @unique
+  firstName    String
+  lastName     String
+  email        String     @unique
+  username     String     @unique
+  passwordHash String
+  status       UserStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  roles   UserRole[]
+  offices OfficeUser[]
+
+  createdDocuments Document[] @relation("DocumentCreator")
+
+  sentRoutes     DocumentRoute[] @relation("RouteSender")
+  receivedRoutes DocumentRoute[] @relation("RouteReceiver")
+
+  logs DocumentLog[]
+}
+
+model Role {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+
+  users UserRole[]
+}
+
+model UserRole {
+  id String @id @default(uuid())
+
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId])
+}
+
+model OrganizationUnit {
+  id          String             @id @default(uuid())
+  code        String             @unique
+  name        String
+  type        OrganizationType
+  description String?
+  parentId    String?
+  parent      OrganizationUnit?  @relation("OrganizationHierarchy", fields: [parentId], references: [id])
+  children    OrganizationUnit[] @relation("OrganizationHierarchy")
+
+  offices Office[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Office {
+  id          String  @id @default(uuid())
+  officeCode  String  @unique
+  officeName  String
+  description String?
+
+  organizationUnitId String
+  organizationUnit   OrganizationUnit @relation(fields: [organizationUnitId], references: [id])
+
+  users OfficeUser[]
+
+  currentDocuments Document[]
+
+  sentRoutes     DocumentRoute[] @relation("FromOffice")
+  receivedRoutes DocumentRoute[] @relation("ToOffice")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model OfficeUser {
+  id String @id @default(uuid())
+
+  officeId String
+  userId   String
+
+  designation   String?
+  isOfficeAdmin Boolean @default(false)
+
+  office Office @relation(fields: [officeId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([officeId, userId])
+}
+
+model DocumentType {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+
+  documents Document[]
+}
+
+model DocumentStatus {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+
+  documents Document[]
+}
+
+model Document {
+  id String @id @default(uuid())
+
+  trackingNumber String @unique
+
+  documentTypeId  String
+  currentStatusId String
+  currentOfficeId String
+
+  title       String
+  description String?
+
+  referenceNumber String?
+
+  createdById String
+
+  priority             String?
+  confidentialityLevel String?
+
+  deadline DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documentType DocumentType @relation(fields: [documentTypeId], references: [id])
+
+  currentStatus DocumentStatus @relation(fields: [currentStatusId], references: [id])
+
+  currentOffice Office @relation(fields: [currentOfficeId], references: [id])
+
+  createdBy User @relation("DocumentCreator", fields: [createdById], references: [id])
+
+  attachments DocumentAttachment[]
+  routes      DocumentRoute[]
+  logs        DocumentLog[]
+}
+
+model DocumentAttachment {
+  id String @id @default(uuid())
+
+  documentId String
+
+  fileName String
+  filePath String
+  mimeType String?
+  fileSize Int?
+  publicId String
+
+  uploadedAt DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model DocumentRoute {
+  id String @id @default(uuid())
+
+  documentId String
+
+  fromOfficeId String
+  toOfficeId   String
+
+  sentByUserId     String
+  receivedByUserId String?
+
+  status RouteStatus @default(PENDING)
+
+  remarks String?
+
+  sentAt      DateTime  @default(now())
+  receivedAt  DateTime?
+  completedAt DateTime?
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  fromOffice Office @relation("FromOffice", fields: [fromOfficeId], references: [id])
+
+  toOffice Office @relation("ToOffice", fields: [toOfficeId], references: [id])
+
+  sentBy User @relation("RouteSender", fields: [sentByUserId], references: [id])
+
+  receivedBy User? @relation("RouteReceiver", fields: [receivedByUserId], references: [id])
+}
+
+model DocumentLog {
+  id String @id @default(uuid())
+
+  documentId String
+  userId     String
+
+  action      String
+  description String?
+
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  user User @relation(fields: [userId], references: [id])
+}
