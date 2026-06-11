@@ -1,4 +1,12 @@
-import { IsDateString, IsOptional, IsString } from 'class-validator';
+import {
+  IsDateString,
+  IsOptional,
+  IsString,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { CreateDocumentAttachmentDto } from './create-document-attachment.dto';
 
 export class CreateDocumentDto {
   @IsString()
@@ -26,4 +34,10 @@ export class CreateDocumentDto {
   @IsOptional()
   @IsDateString()
   deadline?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateDocumentAttachmentDto)
+  attachments?: CreateDocumentAttachmentDto[];
 }

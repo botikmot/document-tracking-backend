@@ -119,6 +119,16 @@ export class DocumentsController {
     return this.documentsService.getReceivedDocuments(req.user);
   }
 
+  @Get('next-tracking-number')
+  @Roles('SUPER_ADMIN', 'OFFICE_ADMIN', 'SECRETARY', 'ENCODER')
+  async getNextTrackingNumber() {
+    const trackingNumber = await this.documentsService.getNextTrackingNumber();
+
+    return {
+      trackingNumber,
+    };
+  }
+
   /*
    |--------------------------------------------------------------------------
    | ARCHIVED DOCUMENTS

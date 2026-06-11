@@ -108,6 +108,16 @@ export class DocumentsService {
         confidentialityLevel: dto.confidentialityLevel,
         deadline: dto.deadline,
         createdById: currentUser.userId,
+        attachments: {
+          create:
+            dto.attachments?.map((file) => ({
+              fileName: file.fileName,
+              filePath: file.filePath,
+              mimeType: file.mimeType,
+              fileSize: file.fileSize,
+              publicId: file.publicId,
+            })) || [],
+        },
       },
 
       include: {
@@ -115,6 +125,7 @@ export class DocumentsService {
         currentStatus: true,
         currentOffice: true,
         createdBy: true,
+        attachments: true,
       },
     });
 
@@ -897,5 +908,9 @@ export class DocumentsService {
     });
 
     return document;
+  }
+
+  async getNextTrackingNumber() {
+    return await this.generateTrackingNumber();
   }
 }
