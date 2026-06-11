@@ -96,7 +96,8 @@ model Office {
 
   users OfficeUser[]
 
-  currentDocuments Document[]
+  currentDocuments Document[] @relation("CurrentOffice")
+  senderDocuments Document[] @relation("SenderOffice")
 
   sentRoutes     DocumentRoute[] @relation("FromOffice")
   receivedRoutes DocumentRoute[] @relation("ToOffice")
@@ -145,6 +146,12 @@ model Document {
   currentStatusId String
   currentOfficeId String
 
+  senderType String?
+  senderOfficeId String?
+  senderName String?
+  senderOrganization String?
+  senderContact String?
+
   title       String
   description String?
 
@@ -164,7 +171,9 @@ model Document {
 
   currentStatus DocumentStatus @relation(fields: [currentStatusId], references: [id])
 
-  currentOffice Office @relation(fields: [currentOfficeId], references: [id])
+  currentOffice Office @relation("CurrentOffice", fields: [currentOfficeId], references: [id])
+
+  senderOffice Office? @relation("SenderOffice", fields: [senderOfficeId], references: [id])
 
   createdBy User @relation("DocumentCreator", fields: [createdById], references: [id])
 

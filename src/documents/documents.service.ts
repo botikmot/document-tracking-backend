@@ -108,6 +108,20 @@ export class DocumentsService {
         confidentialityLevel: dto.confidentialityLevel,
         deadline: dto.deadline,
         createdById: currentUser.userId,
+        senderType: dto.senderType,
+        senderOfficeId:
+          dto.senderType === 'OFFICE' ? officeUser.officeId : null,
+        senderName: dto.senderType === 'CLIENT' ? dto.senderName : null,
+        senderOrganization:
+          dto.senderType === 'COMPANY' || dto.senderType === 'AGENCY'
+            ? dto.senderOrganization
+            : null,
+        senderContact:
+          dto.senderType === 'AGENCY' ||
+          dto.senderType === 'CLIENT' ||
+          dto.senderType === 'COMPANY'
+            ? dto.senderName
+            : null,
         attachments: {
           create:
             dto.attachments?.map((file) => ({
@@ -124,6 +138,7 @@ export class DocumentsService {
         documentType: true,
         currentStatus: true,
         currentOffice: true,
+        senderOffice: true,
         createdBy: true,
         attachments: true,
       },

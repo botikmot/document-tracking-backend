@@ -36,6 +36,26 @@ export class CreateDocumentDto {
   deadline?: string;
 
   @IsOptional()
+  @IsString()
+  senderType?: string;
+
+  @IsOptional()
+  @IsString()
+  senderOfficeId?: string;
+
+  @IsOptional()
+  @IsString()
+  senderName?: string;
+
+  @IsOptional()
+  @IsString()
+  senderOrganization?: string;
+
+  @IsOptional()
+  @IsString()
+  senderContact?: string;
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateDocumentAttachmentDto)
