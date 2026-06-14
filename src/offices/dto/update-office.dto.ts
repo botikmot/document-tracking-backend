@@ -1,4 +1,5 @@
-import { IsOptional, IsString } from 'class-validator';
+import { OfficeCategory } from '@prisma/client';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class UpdateOfficeDto {
   @IsOptional()
@@ -16,4 +17,10 @@ export class UpdateOfficeDto {
   @IsOptional()
   @IsString()
   parentOfficeId?: string;
+
+  @IsString()
+  organizationUnitId!: string;
+
+  @IsEnum(OfficeCategory)
+  category!: OfficeCategory;
 }

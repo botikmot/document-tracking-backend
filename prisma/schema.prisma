@@ -25,6 +25,11 @@ enum OrganizationType {
   CENRO
 }
 
+enum OfficeCategory {
+  REGULAR
+  RECORDS
+}
+
 model User {
   id           String     @id @default(uuid())
   employeeId   String?    @unique
@@ -89,6 +94,7 @@ model Office {
   id          String  @id @default(uuid())
   officeCode  String  @unique
   officeName  String
+  category    OfficeCategory @default(REGULAR)
   description String?
 
   organizationUnitId String

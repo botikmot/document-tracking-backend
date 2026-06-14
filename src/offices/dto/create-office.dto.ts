@@ -1,4 +1,5 @@
-import { IsOptional, IsString } from 'class-validator';
+import { OfficeCategory } from '@prisma/client';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class CreateOfficeDto {
   @IsString()
@@ -11,7 +12,9 @@ export class CreateOfficeDto {
   @IsString()
   description?: string;
 
-  @IsOptional()
   @IsString()
   organizationUnitId!: string;
+
+  @IsEnum(OfficeCategory)
+  category!: OfficeCategory;
 }
