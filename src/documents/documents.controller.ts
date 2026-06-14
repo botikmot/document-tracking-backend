@@ -130,6 +130,20 @@ export class DocumentsController {
   }
 
   /*
+ |--------------------------------------------------------------------------
+ | TRACK DOCUMENT
+ |--------------------------------------------------------------------------
+ */
+
+  @Get('track/:trackingNumber')
+  trackDocument(
+    @Param('trackingNumber')
+    trackingNumber: string,
+  ) {
+    return this.documentsService.trackDocument(trackingNumber);
+  }
+
+  /*
    |--------------------------------------------------------------------------
    | ARCHIVED DOCUMENTS
    |--------------------------------------------------------------------------

@@ -301,11 +301,14 @@ export class OfficesService {
     }
 
     const currentOffice = user.offices[0].office;
-
     const currentOrganization = currentOffice.organizationUnit;
-
     const isRecordsOffice = currentOffice.category === 'RECORDS';
 
+    const excludeCurrentOffice = {
+      NOT: {
+        id: currentOffice.id,
+      },
+    };
     /*
      |------------------------------------------------------------------
      | REGIONAL
@@ -343,6 +346,7 @@ export class OfficesService {
                 },
               },
             ],
+            ...excludeCurrentOffice,
           },
 
           include: {
@@ -364,6 +368,7 @@ export class OfficesService {
       return this.prisma.office.findMany({
         where: {
           organizationUnitId: currentOrganization.id,
+          ...excludeCurrentOffice,
         },
 
         include: {
@@ -425,6 +430,7 @@ export class OfficesService {
                 },
               },
             ],
+            ...excludeCurrentOffice,
           },
 
           include: {
@@ -446,6 +452,7 @@ export class OfficesService {
       return this.prisma.office.findMany({
         where: {
           organizationUnitId: currentOrganization.id,
+          ...excludeCurrentOffice,
         },
 
         include: {
@@ -493,6 +500,7 @@ export class OfficesService {
                 organizationUnitId: currentOrganization.parentId!,
               },
             ],
+            ...excludeCurrentOffice,
           },
 
           include: {
@@ -514,6 +522,7 @@ export class OfficesService {
       return this.prisma.office.findMany({
         where: {
           organizationUnitId: currentOrganization.id,
+          ...excludeCurrentOffice,
         },
 
         include: {

@@ -106,6 +106,7 @@ export class DocumentsService {
         referenceNumber: dto.referenceNumber,
         priority: dto.priority,
         confidentialityLevel: dto.confidentialityLevel,
+        classification: dto.classification,
         deadline: dto.deadline,
         createdById: currentUser.userId,
         senderType: dto.senderType,
@@ -927,5 +928,101 @@ export class DocumentsService {
 
   async getNextTrackingNumber() {
     return await this.generateTrackingNumber();
+  }
+
+  /*
+ |--------------------------------------------------------------------------
+ | TRACK DOCUMENT (PUBLIC)
+ |--------------------------------------------------------------------------
+ */
+
+  async trackDocument(trackingNumber: string) {
+    const document = await this.prisma.document.findUnique({
+      where: {
+        trackingNumber,
+      },
+
+      include: {
+        documentType: true,
+        currentStatus: true,
+        currentOffice: {
+          include: {
+            organizationUnit: true,
+          },
+        },
+
+        senderOffice: true,
+
+        routes: {
+          include: {
+            fromOffice: {
+              include: {
+                organizationUnit: true,
+              },
+            },
+
+            toOffice: {
+              include: {
+                organizationUnit: true,
+              },
+            },
+
+            sentBy: {
+              select: {
+                firstName: true,
+                lastName: true,
+              },
+            },
+
+            receivedBy: {
+              select: {
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+
+          orderBy: {
+            sentAt: 'asc',
+          },
+        },
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Tracking number not found');
+    }
+
+    /*
+   |--------------------------------------------------------------------------
+   | RETURN SAFE PUBLIC DATA ONLY
+   |--------------------------------------------------------------------------
+   */
+
+    return {
+      trackingNumber: document.trackingNumber,
+      title: document.title,
+      description: document.description,
+      referenceNumber: document.referenceNumber,
+      priority: document.priority,
+      classification: document.classification,
+      createdAt: document.createdAt,
+      deadline: document.deadline,
+      documentType: document.documentType,
+      currentStatus: document.currentStatus,
+      currentOffice: document.currentOffice,
+      routes: document.routes.map((route) => ({
+        id: route.id,
+        fromOffice: route.fromOffice,
+        toOffice: route.toOffice,
+        status: route.status,
+        remarks: route.remarks,
+        sentAt: route.sentAt,
+        receivedAt: route.receivedAt,
+        completedAt: route.completedAt,
+        sentBy: route.sentBy,
+        receivedBy: route.receivedBy,
+      })),
+    };
   }
 }

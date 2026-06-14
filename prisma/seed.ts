@@ -43,6 +43,7 @@ async function main() {
     'Contract',
     'Payroll',
     'Letter',
+    'Others',
   ];
 
   for (const name of documentTypes) {
@@ -64,10 +65,13 @@ async function main() {
   const documentStatuses = [
     'DRAFT',
     'PENDING',
-    'IN_REVIEW',
+    'FOR_REVIEW',
     'APPROVED',
     'REJECTED',
     'COMPLETED',
+    'ON_PROCESS',
+    'FOR_APPROVAL',
+    'FOR_RELEASE',
   ];
 
   for (const name of documentStatuses) {

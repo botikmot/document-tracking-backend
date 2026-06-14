@@ -31,6 +31,9 @@ export class CreateDocumentDto {
   @IsString()
   confidentialityLevel?: string;
 
+  @IsString()
+  classification?: string;
+
   @IsOptional()
   @IsDateString()
   deadline?: string;
