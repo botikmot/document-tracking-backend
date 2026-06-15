@@ -68,6 +68,10 @@ export class AuthService {
 
     const roles = user.roles.map((userRole) => userRole.role.name);
     const officeIds = user.offices.map((userOffice) => userOffice.officeId);
+    const offices = user.offices.map((userOffice) => ({
+      officeId: userOffice.office.id,
+      officeName: userOffice.office.officeName,
+    }));
 
     const isPasswordValid = await bcrypt.compare(
       dto.password,
@@ -92,8 +96,10 @@ export class AuthService {
       user: {
         userId: user.id,
         username: user.username,
+        firstName: user.firstName,
         roles,
         officeIds,
+        offices,
       },
     };
   }

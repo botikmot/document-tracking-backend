@@ -105,6 +105,20 @@ export class DocumentsController {
   }
 
   /*
+|--------------------------------------------------------------------------
+| DASHBOARD STATS
+|--------------------------------------------------------------------------
+*/
+
+  @Get('dashboard/stats')
+  getDashboardStats(
+    @Req()
+    req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.getDashboardStats(req.user);
+  }
+
+  /*
    |--------------------------------------------------------------------------
    | RECEIVED DOCUMENTS
    |--------------------------------------------------------------------------

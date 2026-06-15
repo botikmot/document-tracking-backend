@@ -1027,4 +1027,237 @@ export class DocumentsService {
       })),
     };
   }
+
+  /*
+|--------------------------------------------------------------------------
+| DASHBOARD STATS
+|--------------------------------------------------------------------------
+*/
+
+  async getDashboardStats(currentUser: AuthenticatedUser) {
+    const now = new Date();
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(now.getDate() - 7);
+
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(now.getDate() - 14);
+
+    const [
+      incomingDocuments,
+      outgoingDocuments,
+      pendingDocuments,
+      archivedDocuments,
+    ] = await Promise.all([
+      this.prisma.documentRoute.count({
+        where: {
+          toOfficeId: {
+            in: currentUser.officeIds,
+          },
+
+          receivedAt: {
+            not: null,
+          },
+        },
+      }),
+
+      this.prisma.documentRoute.count({
+        where: {
+          fromOfficeId: {
+            in: currentUser.officeIds,
+          },
+        },
+      }),
+
+      this.prisma.document.count({
+        where: {
+          currentOfficeId: {
+            in: currentUser.officeIds,
+          },
+
+          currentStatus: {
+            name: {
+              in: ['PENDING', 'IN_REVIEW'],
+            },
+          },
+        },
+      }),
+
+      this.prisma.document.count({
+        where: {
+          currentOfficeId: {
+            in: currentUser.officeIds,
+          },
+
+          currentStatus: {
+            name: 'COMPLETED',
+          },
+        },
+      }),
+    ]);
+
+    const [currentIncomingWeek, previousIncomingWeek] = await Promise.all([
+      this.prisma.documentRoute.count({
+        where: {
+          toOfficeId: {
+            in: currentUser.officeIds,
+          },
+
+          receivedAt: {
+            not: null,
+            gte: sevenDaysAgo,
+          },
+        },
+      }),
+
+      this.prisma.documentRoute.count({
+        where: {
+          toOfficeId: {
+            in: currentUser.officeIds,
+          },
+
+          receivedAt: {
+            not: null,
+            gte: fourteenDaysAgo,
+            lt: sevenDaysAgo,
+          },
+        },
+      }),
+    ]);
+
+    const incomingPercentage =
+      previousIncomingWeek === 0
+        ? currentIncomingWeek > 0
+          ? 100
+          : 0
+        : Math.round(
+            ((currentIncomingWeek - previousIncomingWeek) /
+              previousIncomingWeek) *
+              100,
+          );
+
+    const [currentOutgoingWeek, previousOutgoingWeek] = await Promise.all([
+      this.prisma.documentRoute.count({
+        where: {
+          fromOfficeId: {
+            in: currentUser.officeIds,
+          },
+
+          sentAt: {
+            gte: sevenDaysAgo,
+          },
+        },
+      }),
+
+      this.prisma.documentRoute.count({
+        where: {
+          fromOfficeId: {
+            in: currentUser.officeIds,
+          },
+
+          sentAt: {
+            gte: fourteenDaysAgo,
+            lt: sevenDaysAgo,
+          },
+        },
+      }),
+    ]);
+
+    const outgoingPercentage =
+      previousOutgoingWeek === 0
+        ? 100
+        : Math.round(
+            ((currentOutgoingWeek - previousOutgoingWeek) /
+              previousOutgoingWeek) *
+              100,
+          );
+
+    const recentActivities = await this.prisma.document.findMany({
+      where: {
+        currentOfficeId: {
+          in: currentUser.officeIds,
+        },
+      },
+
+      include: {
+        currentStatus: true,
+        documentType: true,
+      },
+
+      orderBy: {
+        updatedAt: 'desc',
+      },
+
+      take: 5,
+    });
+
+    const formattedRecentActivities = recentActivities.map((doc) => ({
+      id: doc.id,
+      title: doc.title,
+      trackingNumber: doc.trackingNumber,
+      status: doc.currentStatus.name,
+    }));
+
+    const totalDocuments = await this.prisma.document.count({
+      where: {
+        currentOfficeId: {
+          in: currentUser.officeIds,
+        },
+      },
+    });
+
+    const completedDocuments = await this.prisma.document.count({
+      where: {
+        currentOfficeId: {
+          in: currentUser.officeIds,
+        },
+
+        currentStatus: {
+          name: 'COMPLETED',
+        },
+      },
+    });
+
+    const processingEfficiency =
+      totalDocuments === 0
+        ? 0
+        : Math.round((completedDocuments / totalDocuments) * 100);
+
+    const approvedDocuments = await this.prisma.document.count({
+      where: {
+        currentOfficeId: {
+          in: currentUser.officeIds,
+        },
+
+        currentStatus: {
+          name: 'APPROVED',
+        },
+      },
+    });
+
+    const approvalCompletion =
+      totalDocuments === 0
+        ? 0
+        : Math.round((approvedDocuments / totalDocuments) * 100);
+
+    const archivedRecords =
+      totalDocuments === 0
+        ? 0
+        : Math.round((archivedDocuments / totalDocuments) * 100);
+
+    return {
+      incomingDocuments,
+      outgoingDocuments,
+      pendingDocuments,
+      archivedDocuments,
+      incomingPercentage,
+      outgoingPercentage,
+      recentActivities: formattedRecentActivities,
+
+      performance: {
+        processingEfficiency,
+        approvalCompletion,
+        archivedRecords,
+      },
+    };
+  }
 }
