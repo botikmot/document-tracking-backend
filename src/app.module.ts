@@ -10,6 +10,10 @@ import { RoutingModule } from './routing/routing.module';
 import { RolesModule } from './roles/roles.module';
 import { OrganizationUnitsModule } from './organization-units/organization-units.module';
 import { DocumentTypesModule } from './document-types/document-types.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { NotificationsModule } from './notifications/notifications.module';
+import { MailModule } from './mail/mail.module';
+import { SmsModule } from './sms/sms.module';
 
 @Module({
   imports: [
@@ -22,6 +26,10 @@ import { DocumentTypesModule } from './document-types/document-types.module';
     RolesModule,
     OrganizationUnitsModule,
     DocumentTypesModule,
+    ScheduleModule.forRoot(),
+    NotificationsModule,
+    MailModule,
+    SmsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
