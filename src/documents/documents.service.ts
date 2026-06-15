@@ -108,6 +108,7 @@ export class DocumentsService {
         confidentialityLevel: dto.confidentialityLevel,
         classification: dto.classification,
         deadline: dto.deadline,
+        addressee: dto.addressee,
         createdById: currentUser.userId,
         senderType: dto.senderType,
         senderOfficeId:
@@ -222,6 +223,7 @@ export class DocumentsService {
         documentType: true,
         currentStatus: true,
         currentOffice: true,
+        senderOffice: true,
         createdBy: true,
         routes: {
           include: {

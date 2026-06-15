@@ -38,6 +38,9 @@ export class CreateDocumentDto {
   @IsDateString()
   deadline?: string;
 
+  @IsString()
+  addressee?: string;
+
   @IsOptional()
   @IsString()
   senderType?: string;

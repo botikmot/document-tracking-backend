@@ -157,6 +157,7 @@ model Document {
   senderName String?
   senderOrganization String?
   senderContact String?
+  addressee String?
 
   title       String
   description String?
