@@ -236,7 +236,7 @@ export class DocumentsController {
    */
 
   @Post(':id/receive')
-  @Roles('SUPER_ADMIN', 'OFFICE_ADMIN', 'SECRETARY')
+  @Roles('SUPER_ADMIN', 'OFFICE_ADMIN', 'SECRETARY', 'ENCODER')
   receiveDocument(
     @Param('id')
     id: string,

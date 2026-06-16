@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { MailService } from '../mail/mail.service';
 import { SmsService } from '../sms/sms.service';
+import { NotificationsGateway } from './notifications.gateway';
 
 @Injectable()
 export class NotificationsService {
@@ -11,6 +12,7 @@ export class NotificationsService {
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
     private readonly smsService: SmsService,
+    private readonly notificationsGateway: NotificationsGateway,
   ) {}
 
   /*
@@ -19,7 +21,7 @@ export class NotificationsService {
    |-------------------------------------------------------------
    */
 
-  @Cron('0 * * * *') // every hour
+  @Cron('* * * * *') // every hour
   async checkDeadlines() {
     const now = new Date();
     console.log('CRON RUNNING...');
@@ -67,8 +69,39 @@ export class NotificationsService {
     console.log('FOUND DOCS:', documents.length);
 
     for (const doc of documents) {
-      console.log('SENDING EMAIL:', doc.title);
-      await this.prisma.notification.create({
+      const officeUsers = await this.prisma.officeUser.findMany({
+        where: {
+          officeId: doc.currentOfficeId,
+        },
+
+        include: {
+          user: true,
+        },
+      });
+
+      for (const officeUser of officeUsers) {
+        const notification = await this.prisma.notification.create({
+          data: {
+            userId: officeUser.userId,
+            title: 'Document Deadline Reminder',
+            message: `Document "${doc.title}" is nearing its deadline.`,
+            type: 'DEADLINE',
+          },
+        });
+
+        this.notificationsGateway.sendNotification(
+          officeUser.userId,
+          notification,
+        );
+
+        /* this.notificationsGateway.sendNotification(officeUser.userId, {
+          title: 'Document Deadline Reminder',
+          message: `Document "${doc.title}" is nearing its deadline.`,
+          type: 'SYSTEM',
+        }); */
+      }
+
+      /* await this.prisma.notification.create({
         data: {
           userId: doc.createdById,
           title: 'Document Deadline Reminder',
@@ -77,12 +110,18 @@ export class NotificationsService {
         },
       });
 
+      this.notificationsGateway.sendNotification(doc.createdById, {
+        title: 'Document Deadline Reminder',
+        message: `Document "${doc.title}" is nearing its deadline.`,
+        type: 'SYSTEM',
+      }); */
+
       /*
    |------------------------------------------------------------
    | EMAIL
    |------------------------------------------------------------
    */
-
+      console.log('SENDING EMAIL:', doc.title);
       await this.mailService.sendDeadlineReminder(
         'gonzrock12@gmail.com', //doc.createdBy.email,
         doc.title,
@@ -123,8 +162,50 @@ export class NotificationsService {
         userId: currentUser.userId,
       },
 
-      orderBy: {
-        createdAt: 'desc',
+      orderBy: [
+        {
+          isRead: 'asc',
+        },
+        {
+          createdAt: 'desc',
+        },
+      ],
+    });
+  }
+
+  /*
+|--------------------------------------------------------------------------
+| MARK AS READ
+|--------------------------------------------------------------------------
+*/
+
+  async markAsRead(id: string) {
+    return this.prisma.notification.update({
+      where: {
+        id,
+      },
+
+      data: {
+        isRead: true,
+      },
+    });
+  }
+
+  /*
+|--------------------------------------------------------------------------
+| MARK ALL AS READ
+|--------------------------------------------------------------------------
+*/
+
+  async markAllAsRead(currentUser: AuthenticatedUser) {
+    return this.prisma.notification.updateMany({
+      where: {
+        userId: currentUser.userId,
+        isRead: false,
+      },
+
+      data: {
+        isRead: true,
       },
     });
   }
