@@ -7,6 +7,7 @@ import {
   Post,
   Req,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 
 import { DocumentsService } from './documents.service';
@@ -55,8 +56,26 @@ export class DocumentsController {
   findAll(
     @Req()
     req: AuthenticatedRequest,
+
+    @Query('page')
+    page = '1',
+
+    @Query('limit')
+    limit = '5',
+
+    @Query('status')
+    status?: string,
+
+    @Query('search')
+    search?: string,
   ) {
-    return this.documentsService.findAll(req.user);
+    return this.documentsService.findAll(
+      req.user,
+      Number(page),
+      Number(limit),
+      status,
+      search,
+    );
   }
 
   /*
@@ -70,8 +89,21 @@ export class DocumentsController {
   getIncoming(
     @Req()
     req: AuthenticatedRequest,
+    @Query('page')
+    page?: string,
+
+    @Query('limit')
+    limit?: string,
+
+    @Query('search')
+    search?: string,
   ) {
-    return this.documentsService.getIncomingDocuments(req.user);
+    return this.documentsService.getIncomingDocuments(
+      req.user,
+      Number(page) || 1,
+      Number(limit) || 5,
+      search,
+    );
   }
 
   /*
@@ -85,8 +117,21 @@ export class DocumentsController {
   getOutgoing(
     @Req()
     req: AuthenticatedRequest,
+    @Query('page')
+    page = '1',
+
+    @Query('limit')
+    limit = '5',
+
+    @Query('search')
+    search?: string,
   ) {
-    return this.documentsService.getOutgoingDocuments(req.user);
+    return this.documentsService.getOutgoingDocuments(
+      req.user,
+      Number(page),
+      Number(limit),
+      search,
+    );
   }
 
   /*
@@ -100,8 +145,21 @@ export class DocumentsController {
   getPending(
     @Req()
     req: AuthenticatedRequest,
+    @Query('page')
+    page = '1',
+
+    @Query('limit')
+    limit = '5',
+
+    @Query('search')
+    search?: string,
   ) {
-    return this.documentsService.getPendingDocuments(req.user);
+    return this.documentsService.getPendingDocuments(
+      req.user,
+      Number(page),
+      Number(limit),
+      search,
+    );
   }
 
   /*
@@ -168,8 +226,21 @@ export class DocumentsController {
   getArchived(
     @Req()
     req: AuthenticatedRequest,
+    @Query('page')
+    page = '1',
+
+    @Query('limit')
+    limit = '5',
+
+    @Query('search')
+    search?: string,
   ) {
-    return this.documentsService.getArchivedDocuments(req.user);
+    return this.documentsService.getArchivedDocuments(
+      req.user,
+      Number(page) || 1,
+      Number(limit) || 5,
+      search,
+    );
   }
 
   /*

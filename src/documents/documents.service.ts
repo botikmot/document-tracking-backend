@@ -14,6 +14,7 @@ import { RouteDocumentDto } from './dto/route-document.dto';
 import { ReturnDocumentDto } from './dto/return-document.dto';
 import { DecisionDocumentDto } from './dto/decision-document.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class DocumentsService {
@@ -174,19 +175,97 @@ export class DocumentsService {
    |--------------------------------------------------------------------------
    */
 
-  async findAll(currentUser: AuthenticatedUser) {
+  async findAll(
+    currentUser: AuthenticatedUser,
+    page = 1,
+    limit = 10,
+    status?: string,
+    search?: string,
+  ) {
+    const skip = (page - 1) * limit;
+
     /*
    |------------------------------------------------------------
-   | SUPER ADMIN
+   | BASE WHERE
    |------------------------------------------------------------
    */
 
-    if (currentUser.roles.includes('SUPER_ADMIN')) {
-      return this.prisma.document.findMany({
+    const where: Prisma.DocumentWhereInput = {};
+
+    /*
+   |------------------------------------------------------------
+   | STATUS FILTER
+   |------------------------------------------------------------
+   */
+
+    if (status && status !== 'ALL') {
+      where.currentStatus = {
+        name: status,
+      };
+    }
+
+    /*
+   |------------------------------------------------------------
+   | SEARCH
+   |------------------------------------------------------------
+   */
+
+    if (search) {
+      where.OR = [
+        {
+          title: {
+            contains: search,
+            mode: 'insensitive',
+          },
+        },
+
+        {
+          trackingNumber: {
+            contains: search,
+            mode: 'insensitive',
+          },
+        },
+      ];
+    }
+
+    /*
+   |------------------------------------------------------------
+   | OFFICE FILTER
+   |------------------------------------------------------------
+   */
+
+    if (!currentUser.roles.includes('SUPER_ADMIN')) {
+      const officeUsers = await this.prisma.officeUser.findMany({
+        where: {
+          userId: currentUser.userId,
+        },
+      });
+
+      const officeIds = officeUsers.map((office) => office.officeId);
+
+      where.currentOfficeId = {
+        in: officeIds,
+      };
+    }
+
+    /*
+   |------------------------------------------------------------
+   | GET DATA
+   |------------------------------------------------------------
+   */
+
+    const [documents, total] = await Promise.all([
+      this.prisma.document.findMany({
+        where,
+
+        skip,
+        take: limit,
+
         include: {
           documentType: true,
           currentStatus: true,
           currentOffice: true,
+          senderOffice: true,
           createdBy: true,
           attachments: true,
         },
@@ -194,61 +273,24 @@ export class DocumentsService {
         orderBy: {
           createdAt: 'desc',
         },
-      });
-    }
+      }),
 
-    /*
-   |------------------------------------------------------------
-   | GET USER OFFICES
-   |------------------------------------------------------------
-   */
+      this.prisma.document.count({
+        where,
+      }),
+    ]);
 
-    const officeUsers = await this.prisma.officeUser.findMany({
-      where: {
-        userId: currentUser.userId,
+    return {
+      data: documents,
+
+      meta: {
+        total,
+        page,
+        limit,
+
+        totalPages: Math.ceil(total / limit),
       },
-    });
-
-    const officeIds = officeUsers.map((office) => office.officeId);
-
-    /*
-   |------------------------------------------------------------
-   | RETURN OFFICE DOCUMENTS ONLY
-   |------------------------------------------------------------
-   */
-
-    return this.prisma.document.findMany({
-      where: {
-        currentOfficeId: {
-          in: officeIds,
-        },
-      },
-
-      include: {
-        documentType: true,
-        currentStatus: true,
-        currentOffice: true,
-        senderOffice: true,
-        createdBy: true,
-        routes: {
-          include: {
-            fromOffice: true,
-            toOffice: true,
-            sentBy: true,
-            receivedBy: true,
-          },
-
-          orderBy: {
-            sentAt: 'asc',
-          },
-        },
-        attachments: true,
-      },
-
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+    };
   }
 
   /*
@@ -557,50 +599,114 @@ export class DocumentsService {
   }
 
   /*
-     |--------------------------------------------------------------------------
-     | Get Incoming Documents
-     |--------------------------------------------------------------------------
-     */
+ |--------------------------------------------------------------------------
+ | Get Incoming Documents
+ |--------------------------------------------------------------------------
+ */
 
-  async getIncomingDocuments(currentUser: AuthenticatedUser) {
-    return this.prisma.documentRoute.findMany({
-      where: {
-        toOfficeId: {
+  async getIncomingDocuments(
+    currentUser: AuthenticatedUser,
+    page = 1,
+    limit = 5,
+    search?: string,
+  ) {
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.DocumentRouteWhereInput = {
+      toOfficeId: {
+        in: currentUser.officeIds,
+      },
+
+      receivedAt: null,
+
+      NOT: {
+        fromOfficeId: {
           in: currentUser.officeIds,
         },
-
-        receivedAt: null,
-        NOT: {
-          fromOfficeId: {
-            in: currentUser.officeIds,
-          },
-        },
-        document: {
-          currentOfficeId: {
-            in: currentUser.officeIds,
-          },
-        },
       },
 
-      include: {
-        document: {
-          include: {
-            documentType: true,
-            currentStatus: true,
-            currentOffice: true,
-            createdBy: true,
+      document: {
+        currentOfficeId: {
+          in: currentUser.officeIds,
+        },
+      },
+    };
+
+    /*
+   |------------------------------------------------------------
+   | SEARCH
+   |------------------------------------------------------------
+   */
+
+    if (search) {
+      where.document = {
+        OR: [
+          {
+            title: {
+              contains: search,
+              mode: 'insensitive',
+            },
           },
+
+          {
+            trackingNumber: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+        ],
+      };
+    }
+
+    /*
+   |------------------------------------------------------------
+   | FETCH
+   |------------------------------------------------------------
+   */
+
+    const [routes, total] = await Promise.all([
+      this.prisma.documentRoute.findMany({
+        where,
+
+        skip,
+        take: limit,
+
+        include: {
+          document: {
+            include: {
+              documentType: true,
+              currentStatus: true,
+              currentOffice: true,
+              createdBy: true,
+            },
+          },
+
+          fromOffice: true,
+          toOffice: true,
+          sentBy: true,
         },
 
-        fromOffice: true,
-        toOffice: true,
-        sentBy: true,
-      },
+        orderBy: {
+          sentAt: 'desc',
+        },
+      }),
 
-      orderBy: {
-        sentAt: 'desc',
+      this.prisma.documentRoute.count({
+        where,
+      }),
+    ]);
+
+    return {
+      data: routes,
+
+      meta: {
+        total,
+        page,
+        limit,
+
+        totalPages: Math.ceil(total / limit),
       },
-    });
+    };
   }
 
   /*
@@ -609,46 +715,115 @@ export class DocumentsService {
      |--------------------------------------------------------------------------
      */
 
-  async getOutgoingDocuments(currentUser: AuthenticatedUser) {
-    return this.prisma.documentRoute.findMany({
-      where: {
-        fromOfficeId: {
-          in: currentUser.officeIds,
-        },
+  async getOutgoingDocuments(
+    currentUser: AuthenticatedUser,
+    page = 1,
+    limit = 5,
+    search?: string,
+  ) {
+    const skip = (page - 1) * limit;
+
+    /*
+   |------------------------------------------------------------
+   | WHERE
+   |------------------------------------------------------------
+   */
+
+    const where: Prisma.DocumentRouteWhereInput = {
+      fromOfficeId: {
+        in: currentUser.officeIds,
       },
+    };
 
-      include: {
-        document: {
-          include: {
-            documentType: true,
-            currentStatus: true,
-            currentOffice: true,
-            createdBy: true,
-            routes: {
-              include: {
-                fromOffice: true,
-                toOffice: true,
-                sentBy: true,
-                receivedBy: true,
-              },
+    /*
+   |------------------------------------------------------------
+   | SEARCH
+   |------------------------------------------------------------
+   */
 
-              orderBy: {
-                sentAt: 'asc',
+    if (search) {
+      where.document = {
+        OR: [
+          {
+            title: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+
+          {
+            trackingNumber: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+        ],
+      };
+    }
+
+    /*
+   |------------------------------------------------------------
+   | FETCH
+   |------------------------------------------------------------
+   */
+
+    const [routes, total] = await Promise.all([
+      this.prisma.documentRoute.findMany({
+        where,
+
+        skip,
+        take: limit,
+
+        include: {
+          document: {
+            include: {
+              documentType: true,
+              currentStatus: true,
+              currentOffice: true,
+              createdBy: true,
+
+              routes: {
+                include: {
+                  fromOffice: true,
+                  toOffice: true,
+                  sentBy: true,
+                  receivedBy: true,
+                },
+
+                orderBy: {
+                  sentAt: 'asc',
+                },
               },
             },
           },
+
+          fromOffice: true,
+          toOffice: true,
+          sentBy: true,
+          receivedBy: true,
         },
 
-        fromOffice: true,
-        toOffice: true,
-        sentBy: true,
-        receivedBy: true,
-      },
+        orderBy: {
+          sentAt: 'desc',
+        },
+      }),
 
-      orderBy: {
-        sentAt: 'desc',
+      this.prisma.documentRoute.count({
+        where,
+      }),
+    ]);
+
+    return {
+      data: routes,
+
+      meta: {
+        total,
+        page,
+        limit,
+
+        totalPages: Math.ceil(total / limit),
       },
-    });
+    };
   }
 
   /*
@@ -656,43 +831,116 @@ export class DocumentsService {
      | Get Pending Documents
      |--------------------------------------------------------------------------
      */
-  async getPendingDocuments(currentUser: AuthenticatedUser) {
-    return this.prisma.document.findMany({
-      where: {
-        currentOfficeId: {
-          in: currentUser.officeIds,
-        },
+  async getPendingDocuments(
+    currentUser: AuthenticatedUser,
+    page = 1,
+    limit = 5,
+    search?: string,
+  ) {
+    const skip = (page - 1) * limit;
 
-        currentStatus: {
-          name: {
-            in: ['PENDING', 'FOR_REVIEW', 'FOR_APPROVAL', 'ON_PROCESS'],
-          },
-        },
+    /*
+   |------------------------------------------------------------
+   | WHERE
+   |------------------------------------------------------------
+   */
+
+    const where: Prisma.DocumentWhereInput = {
+      currentOfficeId: {
+        in: currentUser.officeIds,
       },
 
-      include: {
-        documentType: true,
-        currentStatus: true,
-        currentOffice: true,
-        createdBy: true,
-        routes: {
-          include: {
-            fromOffice: true,
-            toOffice: true,
-            sentBy: true,
-            receivedBy: true,
-          },
-
-          orderBy: {
-            sentAt: 'asc',
-          },
+      currentStatus: {
+        name: {
+          in: ['PENDING', 'FOR_REVIEW', 'FOR_APPROVAL', 'ON_PROCESS'],
         },
       },
+    };
 
-      orderBy: {
-        updatedAt: 'desc',
+    /*
+   |------------------------------------------------------------
+   | SEARCH
+   |------------------------------------------------------------
+   */
+
+    if (search) {
+      where.OR = [
+        {
+          title: {
+            contains: search,
+            mode: 'insensitive',
+          },
+        },
+
+        {
+          trackingNumber: {
+            contains: search,
+            mode: 'insensitive',
+          },
+        },
+      ];
+    }
+
+    /*
+   |------------------------------------------------------------
+   | FETCH
+   |------------------------------------------------------------
+   */
+
+    const [documents, total] = await Promise.all([
+      this.prisma.document.findMany({
+        where,
+
+        skip,
+        take: limit,
+
+        include: {
+          documentType: true,
+          currentStatus: true,
+          currentOffice: true,
+          createdBy: true,
+
+          routes: {
+            include: {
+              fromOffice: true,
+              toOffice: true,
+              sentBy: true,
+              receivedBy: true,
+            },
+
+            orderBy: {
+              sentAt: 'asc',
+            },
+          },
+        },
+
+        orderBy: {
+          updatedAt: 'desc',
+        },
+      }),
+
+      this.prisma.document.count({
+        where,
+      }),
+    ]);
+
+    /*
+   |------------------------------------------------------------
+   | RETURN
+   |------------------------------------------------------------
+   */
+
+    return {
+      data: documents,
+
+      meta: {
+        total,
+        page,
+        limit,
+
+        totalPages: Math.ceil(total / limit),
       },
-    });
+    };
   }
 
   /*
@@ -732,33 +980,93 @@ export class DocumentsService {
   }
 
   /*
-     |--------------------------------------------------------------------------
-     | Get Archived Documents
-     |--------------------------------------------------------------------------
-     */
+ |--------------------------------------------------------------------------
+ | Get Archived Documents
+ |--------------------------------------------------------------------------
+ */
 
-  async getArchivedDocuments(currentUser: AuthenticatedUser) {
-    return this.prisma.document.findMany({
-      where: {
-        currentOfficeId: {
-          in: currentUser.officeIds,
+  async getArchivedDocuments(
+    currentUser: AuthenticatedUser,
+    page = 1,
+    limit = 5,
+    search?: string,
+  ) {
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.DocumentWhereInput = {
+      currentOfficeId: {
+        in: currentUser.officeIds,
+      },
+
+      currentStatus: {
+        name: 'COMPLETED',
+      },
+    };
+
+    /*
+   |------------------------------------------------------------
+   | SEARCH
+   |------------------------------------------------------------
+   */
+
+    if (search) {
+      where.OR = [
+        {
+          title: {
+            contains: search,
+            mode: 'insensitive',
+          },
         },
 
-        currentStatus: {
-          name: 'COMPLETED',
+        {
+          trackingNumber: {
+            contains: search,
+            mode: 'insensitive',
+          },
         },
-      },
+      ];
+    }
 
-      include: {
-        documentType: true,
-        currentStatus: true,
-        currentOffice: true,
-      },
+    /*
+   |------------------------------------------------------------
+   | FETCH
+   |------------------------------------------------------------
+   */
 
-      orderBy: {
-        updatedAt: 'desc',
+    const [documents, total] = await Promise.all([
+      this.prisma.document.findMany({
+        where,
+
+        skip,
+        take: limit,
+
+        include: {
+          documentType: true,
+          currentStatus: true,
+          currentOffice: true,
+        },
+
+        orderBy: {
+          updatedAt: 'desc',
+        },
+      }),
+
+      this.prisma.document.count({
+        where,
+      }),
+    ]);
+
+    return {
+      data: documents,
+
+      meta: {
+        total,
+        page,
+        limit,
+
+        totalPages: Math.ceil(total / limit),
       },
-    });
+    };
   }
 
   /*
@@ -1164,7 +1472,7 @@ export class DocumentsService {
 
           currentStatus: {
             name: {
-              in: ['PENDING', 'IN_REVIEW'],
+              in: ['PENDING', 'FOR_REVIEW', 'FOR_APPROVAL', 'ON_PROCESS'],
             },
           },
         },

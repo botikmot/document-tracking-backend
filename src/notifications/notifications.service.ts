@@ -139,6 +139,7 @@ export class NotificationsService {
     return this.prisma.notification.findMany({
       where: {
         userId: currentUser.userId,
+        isRead: false,
       },
 
       orderBy: [
