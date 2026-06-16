@@ -10,5 +10,6 @@ import { NotificationsGateway } from './notifications.gateway';
   imports: [PrismaModule, MailModule, SmsModule],
   providers: [NotificationsService, NotificationsGateway],
   controllers: [NotificationsController],
+  exports: [NotificationsGateway, NotificationsService],
 })
 export class NotificationsModule {}

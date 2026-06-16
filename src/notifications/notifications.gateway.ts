@@ -51,4 +51,8 @@ export class NotificationsGateway
 
     this.server.to(userId).emit('notification', payload);
   }
+
+  sendIncomingDocument(userId: string, payload: unknown) {
+    this.server.to(userId).emit('incoming-document', payload);
+  }
 }

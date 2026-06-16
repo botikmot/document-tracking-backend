@@ -21,7 +21,7 @@ export class NotificationsService {
    |-------------------------------------------------------------
    */
 
-  @Cron('* * * * *') // every hour
+  @Cron('0 * * * *') // every hour
   async checkDeadlines() {
     const now = new Date();
     console.log('CRON RUNNING...');
@@ -93,28 +93,7 @@ export class NotificationsService {
           officeUser.userId,
           notification,
         );
-
-        /* this.notificationsGateway.sendNotification(officeUser.userId, {
-          title: 'Document Deadline Reminder',
-          message: `Document "${doc.title}" is nearing its deadline.`,
-          type: 'SYSTEM',
-        }); */
       }
-
-      /* await this.prisma.notification.create({
-        data: {
-          userId: doc.createdById,
-          title: 'Document Deadline Reminder',
-          message: `Document "${doc.title}" is nearing its deadline.`,
-          type: 'SYSTEM',
-        },
-      });
-
-      this.notificationsGateway.sendNotification(doc.createdById, {
-        title: 'Document Deadline Reminder',
-        message: `Document "${doc.title}" is nearing its deadline.`,
-        type: 'SYSTEM',
-      }); */
 
       /*
    |------------------------------------------------------------

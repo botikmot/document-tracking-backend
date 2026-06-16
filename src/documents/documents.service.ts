@@ -13,10 +13,14 @@ import { UpdateDocumentDto } from './dto/update-document.dto';
 import { RouteDocumentDto } from './dto/route-document.dto';
 import { ReturnDocumentDto } from './dto/return-document.dto';
 import { DecisionDocumentDto } from './dto/decision-document.dto';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 @Injectable()
 export class DocumentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly notificationsGateway: NotificationsGateway,
+  ) {}
 
   /*
    |--------------------------------------------------------------------------
@@ -184,6 +188,7 @@ export class DocumentsService {
           currentStatus: true,
           currentOffice: true,
           createdBy: true,
+          attachments: true,
         },
 
         orderBy: {
@@ -237,6 +242,7 @@ export class DocumentsService {
             sentAt: 'asc',
           },
         },
+        attachments: true,
       },
 
       orderBy: {
@@ -369,6 +375,9 @@ export class DocumentsService {
       where: {
         id: documentId,
       },
+      include: {
+        documentType: true,
+      },
     });
 
     if (!document) {
@@ -439,7 +448,7 @@ export class DocumentsService {
  |--------------------------------------------------------------------------
  */
 
-    await this.prisma.document.update({
+    const updatedDocument = await this.prisma.document.update({
       where: {
         id: documentId,
       },
@@ -447,6 +456,12 @@ export class DocumentsService {
       data: {
         currentOfficeId: dto.toOfficeId,
         currentStatusId: inTransitStatus.id,
+      },
+
+      include: {
+        documentType: true,
+        currentStatus: true,
+        currentOffice: true,
       },
     });
 
@@ -464,6 +479,79 @@ export class DocumentsService {
         description: 'Document routed',
       },
     });
+
+    /*
+ |--------------------------------------------------------------------------
+ | CREATE NOTIFICATION
+ |--------------------------------------------------------------------------
+ */
+
+    const officeUsers = await this.prisma.officeUser.findMany({
+      where: {
+        officeId: dto.toOfficeId,
+      },
+
+      include: {
+        user: true,
+      },
+    });
+
+    for (const officeUser of officeUsers) {
+      /*
+   |------------------------------------------------------------
+   | SAVE DATABASE NOTIFICATION
+   |------------------------------------------------------------
+   */
+
+      const notification = await this.prisma.notification.create({
+        data: {
+          userId: officeUser.userId,
+          title: 'New Incoming Document',
+          message: `${document.title} has been routed to your office.`,
+          type: 'ROUTED',
+        },
+      });
+
+      /*
+   |------------------------------------------------------------
+   | REALTIME SOCKET
+   |------------------------------------------------------------
+   */
+
+      this.notificationsGateway.sendNotification(
+        officeUser.userId,
+        notification,
+      );
+    }
+
+    /*
+   |--------------------------------------------------------------------------
+   | REALTIME INCOMING DOCUMENT
+   |--------------------------------------------------------------------------
+   */
+
+    const destinationUsers = await this.prisma.officeUser.findMany({
+      where: {
+        officeId: dto.toOfficeId,
+      },
+
+      include: {
+        user: true,
+      },
+    });
+
+    for (const officeUser of destinationUsers) {
+      this.notificationsGateway.sendIncomingDocument(officeUser.userId, {
+        id: route.id,
+        status: 'PENDING',
+        remarks: route.remarks,
+        sentAt: route.sentAt,
+        fromOffice: route.fromOffice,
+        toOffice: route.toOffice,
+        sentBy: route.sentBy,
+        document: updatedDocument,
+      });
+    }
 
     return route;
   }
