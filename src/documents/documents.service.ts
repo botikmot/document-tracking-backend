@@ -665,7 +665,7 @@ export class DocumentsService {
 
         currentStatus: {
           name: {
-            in: ['PENDING', 'IN_REVIEW'],
+            in: ['PENDING', 'FOR_REVIEW', 'FOR_APPROVAL', 'ON_PROCESS'],
           },
         },
       },
@@ -1347,5 +1347,72 @@ export class DocumentsService {
         archivedRecords,
       },
     };
+  }
+
+  /*
+|--------------------------------------------------------------------------
+| UPDATE DOCUMENT STATUS
+|--------------------------------------------------------------------------
+*/
+
+  async updateDocumentStatus(
+    documentId: string,
+    statusName: string,
+    currentUser: AuthenticatedUser,
+  ) {
+    /*
+   |--------------------------------------------------------------------------
+   | FIND STATUS
+   |--------------------------------------------------------------------------
+   */
+
+    const status = await this.prisma.documentStatus.findUnique({
+      where: {
+        name: statusName,
+      },
+    });
+
+    if (!status) {
+      throw new NotFoundException('Status not found');
+    }
+
+    /*
+   |--------------------------------------------------------------------------
+   | UPDATE DOCUMENT
+   |--------------------------------------------------------------------------
+   */
+
+    const updatedDocument = await this.prisma.document.update({
+      where: {
+        id: documentId,
+      },
+
+      data: {
+        currentStatusId: status.id,
+      },
+
+      include: {
+        currentStatus: true,
+        currentOffice: true,
+        documentType: true,
+      },
+    });
+
+    /*
+   |--------------------------------------------------------------------------
+   | AUDIT LOG
+   |--------------------------------------------------------------------------
+   */
+
+    await this.prisma.documentLog.create({
+      data: {
+        documentId,
+        userId: currentUser.userId,
+        action: 'STATUS_UPDATED',
+        description: `Document marked as ${status.name}`,
+      },
+    });
+
+    return updatedDocument;
   }
 }

@@ -230,6 +230,32 @@ export class DocumentsController {
   }
 
   /*
+|--------------------------------------------------------------------------
+| UPDATE DOCUMENT STATUS
+|--------------------------------------------------------------------------
+*/
+
+  @Patch(':id/status')
+  @Roles('SUPER_ADMIN', 'OFFICE_ADMIN', 'SECRETARY', 'ENCODER')
+  updateStatus(
+    @Param('id') id: string,
+
+    @Body()
+    body: {
+      status: string;
+    },
+
+    @Req()
+    req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.updateDocumentStatus(
+      id,
+      body.status,
+      req.user,
+    );
+  }
+
+  /*
    |--------------------------------------------------------------------------
    | RECEIVE DOCUMENT
    |--------------------------------------------------------------------------
