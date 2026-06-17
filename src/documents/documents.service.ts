@@ -23,6 +23,27 @@ export class DocumentsService {
     private readonly notificationsGateway: NotificationsGateway,
   ) {}
 
+  private async buildDocumentWhere(
+    currentUser: AuthenticatedUser,
+  ): Promise<Prisma.DocumentWhereInput> {
+    const where: Prisma.DocumentWhereInput = {};
+
+    // OFFICE FILTER
+    if (!currentUser.roles.includes('SUPER_ADMIN')) {
+      const officeUsers = await this.prisma.officeUser.findMany({
+        where: { userId: currentUser.userId },
+      });
+
+      const officeIds = officeUsers.map((o) => o.officeId);
+
+      where.currentOfficeId = {
+        in: officeIds,
+      };
+    }
+
+    return where;
+  }
+
   /*
    |--------------------------------------------------------------------------
    | Generate Tracking Number
@@ -31,11 +52,8 @@ export class DocumentsService {
 
   private async generateTrackingNumber() {
     const year = new Date().getFullYear();
-
     const count = await this.prisma.document.count();
-
     const sequence = String(count + 1).padStart(6, '0');
-
     return `DOC-${year}-${sequence}`;
   }
 
@@ -677,6 +695,7 @@ export class DocumentsService {
               documentType: true,
               currentStatus: true,
               currentOffice: true,
+              senderOffice: true,
               createdBy: true,
             },
           },
@@ -696,6 +715,18 @@ export class DocumentsService {
       }),
     ]);
 
+    const pendingCount = await this.prisma.document.count({
+      where: {
+        currentOfficeId: {
+          in: currentUser.officeIds,
+        },
+
+        currentStatus: {
+          name: 'PENDING',
+        },
+      },
+    });
+
     return {
       data: routes,
 
@@ -705,6 +736,9 @@ export class DocumentsService {
         limit,
 
         totalPages: Math.ceil(total / limit),
+      },
+      stats: {
+        pending: pendingCount,
       },
     };
   }
@@ -767,7 +801,7 @@ export class DocumentsService {
    |------------------------------------------------------------
    */
 
-    const [routes, total] = await Promise.all([
+    const [routes, total, activeRoutes] = await Promise.all([
       this.prisma.documentRoute.findMany({
         where,
 
@@ -780,6 +814,7 @@ export class DocumentsService {
               documentType: true,
               currentStatus: true,
               currentOffice: true,
+              senderOffice: true,
               createdBy: true,
 
               routes: {
@@ -811,6 +846,32 @@ export class DocumentsService {
       this.prisma.documentRoute.count({
         where,
       }),
+      /*
+       |--------------------------------------------------------
+       | ACTIVE ROUTES COUNT
+       |--------------------------------------------------------
+       */
+      this.prisma.documentRoute.count({
+        where: {
+          fromOfficeId: {
+            in: currentUser.officeIds,
+          },
+
+          document: {
+            currentStatus: {
+              name: {
+                in: [
+                  'PENDING',
+                  'FOR_REVIEW',
+                  'FOR_APPROVAL',
+                  'ON_PROCESS',
+                  'IN_TRANSIT',
+                ],
+              },
+            },
+          },
+        },
+      }),
     ]);
 
     return {
@@ -822,6 +883,10 @@ export class DocumentsService {
         limit,
 
         totalPages: Math.ceil(total / limit),
+      },
+      stats: {
+        totalOutgoing: total,
+        activeRoutes,
       },
     };
   }
@@ -898,6 +963,7 @@ export class DocumentsService {
           documentType: true,
           currentStatus: true,
           currentOffice: true,
+          senderOffice: true,
           createdBy: true,
 
           routes: {
@@ -1044,6 +1110,20 @@ export class DocumentsService {
           documentType: true,
           currentStatus: true,
           currentOffice: true,
+          senderOffice: true,
+          createdBy: true,
+          routes: {
+            include: {
+              fromOffice: true,
+              toOffice: true,
+              sentBy: true,
+              receivedBy: true,
+            },
+
+            orderBy: {
+              sentAt: 'asc',
+            },
+          },
         },
 
         orderBy: {
@@ -1056,15 +1136,25 @@ export class DocumentsService {
       }),
     ]);
 
+    const totalDocuments = await this.prisma.document.count({
+      where: {
+        currentOfficeId: {
+          in: currentUser.officeIds,
+        },
+      },
+    });
+
     return {
       data: documents,
-
       meta: {
         total,
         page,
         limit,
-
         totalPages: Math.ceil(total / limit),
+      },
+      stats: {
+        archivedCount: total,
+        totalDocuments,
       },
     };
   }
@@ -1722,5 +1812,127 @@ export class DocumentsService {
     });
 
     return updatedDocument;
+  }
+
+  /*
+   |--------------------------------------------------------------------------
+   | GET STATS
+   |--------------------------------------------------------------------------
+   */
+
+  async getStats(currentUser: AuthenticatedUser) {
+    const baseWhere = await this.buildDocumentWhere(currentUser);
+
+    const [
+      total,
+      pending,
+      urgent,
+      archived,
+      approved,
+      outgoing,
+      outgoingActiveRoute,
+      activeRouting,
+    ] = await Promise.all([
+      // TOTAL
+      this.prisma.document.count({
+        where: baseWhere,
+      }),
+
+      // PENDING GROUP
+      this.prisma.document.count({
+        where: {
+          ...baseWhere,
+          currentStatus: {
+            name: {
+              in: ['PENDING', 'FOR_REVIEW', 'FOR_APPROVAL', 'ON_PROCESS'],
+            },
+          },
+        },
+      }),
+
+      // URGENT
+      this.prisma.document.count({
+        where: {
+          ...baseWhere,
+          priority: {
+            in: ['HIGH', 'URGENT'],
+          },
+        },
+      }),
+
+      // ARCHIVED
+      this.prisma.document.count({
+        where: {
+          ...baseWhere,
+          currentStatus: {
+            name: 'COMPLETED',
+          },
+        },
+      }),
+
+      // APPROVED
+      this.prisma.document.count({
+        where: {
+          ...baseWhere,
+          currentStatus: {
+            name: 'APPROVED',
+          },
+        },
+      }),
+
+      // OUTGOING
+      this.prisma.documentRoute.count({
+        where: {
+          fromOfficeId: {
+            in: currentUser.officeIds,
+          },
+        },
+      }),
+
+      this.prisma.documentRoute.count({
+        where: {
+          fromOfficeId: {
+            in: currentUser.officeIds,
+          },
+
+          document: {
+            currentStatus: {
+              name: {
+                in: [
+                  'PENDING',
+                  'FOR_REVIEW',
+                  'FOR_APPROVAL',
+                  'ON_PROCESS',
+                  'IN_TRANSIT',
+                ],
+              },
+            },
+          },
+        },
+      }),
+
+      // ACTIVE ROUTING
+      this.prisma.document.count({
+        where: {
+          ...baseWhere,
+          currentStatus: {
+            name: {
+              in: ['FOR_REVIEW', 'FOR_APPROVAL', 'ON_PROCESS'],
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      total,
+      pending,
+      urgent,
+      archived,
+      approved,
+      outgoing,
+      outgoingActiveRoute,
+      activeRouting,
+    };
   }
 }

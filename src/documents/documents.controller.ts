@@ -176,6 +176,14 @@ export class DocumentsController {
     return this.documentsService.getDashboardStats(req.user);
   }
 
+  @Get('stats')
+  getStats(
+    @Req()
+    req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.getStats(req.user);
+  }
+
   /*
    |--------------------------------------------------------------------------
    | RECEIVED DOCUMENTS
