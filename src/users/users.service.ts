@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { Prisma } from '@prisma/client';
 
@@ -265,5 +266,102 @@ export class UsersService {
         status: 'INACTIVE',
       },
     });
+  }
+
+  async getProfile(id: string) {
+    return this.prisma.user.findUnique({
+      where: {
+        id,
+      },
+
+      include: {
+        roles: {
+          include: {
+            role: true,
+          },
+        },
+
+        offices: {
+          include: {
+            office: true,
+          },
+        },
+      },
+    });
+  }
+
+  async updateProfile(userId: string, dto: UpdateUserDto) {
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return this.prisma.user.update({
+      where: {
+        id: userId,
+      },
+
+      data: {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        email: dto.email,
+        username: dto.username,
+        mobileNumber: dto.mobileNumber,
+        profileImageUrl: dto.profileImageUrl,
+        profileImageId: dto.profileImageId,
+      },
+    });
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const passwordMatch = await bcrypt.compare(
+      dto.currentPassword,
+      user.passwordHash,
+    );
+
+    if (!passwordMatch) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    const samePassword = await bcrypt.compare(
+      dto.newPassword,
+      user.passwordHash,
+    );
+
+    if (samePassword) {
+      throw new BadRequestException(
+        'New password must be different from current password',
+      );
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+
+    await this.prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        passwordHash: hashedPassword,
+      },
+    });
+
+    return {
+      message: 'Password updated successfully',
+    };
   }
 }

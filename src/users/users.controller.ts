@@ -15,6 +15,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { UsersService } from './users.service';
 import type { AuthenticatedRequest } from '../common/types/authenticated-request.type';
 
@@ -33,6 +34,24 @@ export class UsersController {
   @Roles('SUPER_ADMIN', 'OFFICE_ADMIN')
   findAll() {
     return this.usersService.findAll();
+  }
+
+  @Get('profile/me')
+  getProfile(@Req() req: AuthenticatedRequest) {
+    return this.usersService.getProfile(req.user.userId);
+  }
+
+  @Patch('profile')
+  updateProfile(@Body() dto: UpdateUserDto, @Req() req: AuthenticatedRequest) {
+    return this.usersService.updateProfile(req.user.userId, dto);
+  }
+
+  @Patch('change-password')
+  changePassword(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.usersService.changePassword(req.user.userId, dto);
   }
 
   @Get(':id')

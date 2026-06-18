@@ -39,6 +39,10 @@ model User {
   username     String     @unique
   mobileNumber String?
   passwordHash String
+
+  profileImageUrl String?
+  profileImageId  String? // Cloudinary public_id
+
   status       UserStatus @default(ACTIVE)
 
   createdAt DateTime @default(now())
