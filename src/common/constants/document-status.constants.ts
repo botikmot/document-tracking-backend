@@ -1,0 +1,12 @@
+export const PENDING_STATUSES = [
+  'PENDING',
+  'FOR_REVIEW',
+  'FOR_APPROVAL',
+  'ON_PROCESS',
+];
+
+export const COMPLETED_STATUS = 'COMPLETED';
+
+export const APPROVED_STATUS = 'APPROVED';
+
+export const ARCHIVED_STATUS = 'ARCHIVED';

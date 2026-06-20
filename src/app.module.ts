@@ -14,6 +14,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { NotificationsModule } from './notifications/notifications.module';
 import { MailModule } from './mail/mail.module';
 import { SmsModule } from './sms/sms.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { SmsModule } from './sms/sms.module';
     NotificationsModule,
     MailModule,
     SmsModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

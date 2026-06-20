@@ -95,17 +95,36 @@ export class NotificationsService {
         );
       }
 
+      for (const officeUser of officeUsers) {
+        if (!officeUser.user.email) continue;
+
+        try {
+          await this.mailService.sendDeadlineReminder(
+            officeUser.user.email,
+            doc.title,
+            doc.deadline!,
+          );
+
+          console.log(`Email sent to ${officeUser.user.email}`);
+        } catch (error) {
+          console.error(
+            `Failed to send email to ${officeUser.user.email}`,
+            error,
+          );
+        }
+      }
+
       /*
    |------------------------------------------------------------
    | EMAIL
    |------------------------------------------------------------
    */
-      console.log('SENDING EMAIL:', doc.title);
+      /* console.log('SENDING EMAIL:', doc.title);
       await this.mailService.sendDeadlineReminder(
         'gonzrock12@gmail.com', //doc.createdBy.email,
         doc.title,
         doc.deadline!,
-      );
+      ); */
 
       /*
    |------------------------------------------------------------
