@@ -1673,7 +1673,7 @@ export class DocumentsService {
         updatedAt: 'desc',
       },
 
-      take: 5,
+      take: 3,
     });
 
     const formattedRecentActivities = recentActivities.map((doc) => ({
