@@ -85,6 +85,7 @@ export class NotificationsService {
             userId: officeUser.userId,
             title: 'Document Deadline Reminder',
             message: `Document "${doc.title}" is nearing its deadline.`,
+            documentId: doc.id,
             type: 'DEADLINE',
           },
         });

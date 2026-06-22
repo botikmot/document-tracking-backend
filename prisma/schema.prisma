@@ -272,6 +272,8 @@ model Notification {
   type String // EMAIL | SMS | SYSTEM
 
   isRead Boolean @default(false)
+  
+  documentId String?
 
   createdAt DateTime @default(now())
 

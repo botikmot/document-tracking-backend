@@ -286,6 +286,18 @@ export class DocumentsService {
           senderOffice: true,
           createdBy: true,
           attachments: true,
+          routes: {
+            include: {
+              fromOffice: true,
+              toOffice: true,
+              sentBy: true,
+              receivedBy: true,
+            },
+
+            orderBy: {
+              sentAt: 'asc',
+            },
+          },
         },
 
         orderBy: {
@@ -568,6 +580,7 @@ export class DocumentsService {
           userId: officeUser.userId,
           title: 'New Incoming Document',
           message: `${document.title} has been routed to your office.`,
+          documentId: document.id,
           type: 'ROUTED',
         },
       });
@@ -1657,30 +1670,51 @@ export class DocumentsService {
               100,
           );
 
-    const recentActivities = await this.prisma.document.findMany({
+    const recentRoutes = await this.prisma.documentRoute.findMany({
       where: {
-        currentOfficeId: {
-          in: currentUser.officeIds,
-        },
+        OR: [
+          { fromOfficeId: { in: currentUser.officeIds } },
+          { toOfficeId: { in: currentUser.officeIds } },
+        ],
       },
-
       include: {
-        currentStatus: true,
-        documentType: true,
+        document: {
+          include: {
+            documentType: true,
+            currentStatus: true,
+          },
+        },
+        sentBy: true,
+        receivedBy: true,
       },
-
-      orderBy: {
-        updatedAt: 'desc',
-      },
-
-      take: 3,
     });
 
+    const activities = [
+      ...recentRoutes.map((r) => ({
+        type: 'ROUTE',
+        action: 'DOCUMENT_MOVED',
+        documentId: r.document.id,
+        title: r.document.title,
+        trackingNumber: r.document.trackingNumber,
+        status: r.document.currentStatus.name,
+        from: r.fromOfficeId,
+        to: r.toOfficeId,
+        timestamp: r.sentAt,
+      })),
+    ];
+
+    const recentActivities = activities
+      .sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      )
+      .slice(0, 3);
+
     const formattedRecentActivities = recentActivities.map((doc) => ({
-      id: doc.id,
+      id: doc.documentId,
       title: doc.title,
       trackingNumber: doc.trackingNumber,
-      status: doc.currentStatus.name,
+      status: doc.status,
     }));
 
     const totalDocuments = await this.prisma.document.count({
