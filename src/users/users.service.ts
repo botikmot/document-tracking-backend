@@ -19,6 +19,31 @@ import { Prisma } from '@prisma/client';
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
+  private async generateEmployeeId(): Promise<string> {
+    const lastUser = await this.prisma.user.findFirst({
+      where: {
+        employeeId: {
+          startsWith: 'EMP-',
+        },
+      },
+      orderBy: {
+        employeeId: 'desc',
+      },
+      select: {
+        employeeId: true,
+      },
+    });
+
+    let nextNumber = 1;
+
+    if (lastUser?.employeeId) {
+      const current = parseInt(lastUser.employeeId.replace('EMP-', ''), 10);
+      nextNumber = current + 1;
+    }
+
+    return `EMP-${nextNumber.toString().padStart(4, '0')}`;
+  }
+
   async create(dto: CreateUserDto) {
     const existingUser = await this.prisma.user.findFirst({
       where: {
@@ -38,10 +63,10 @@ export class UsersService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
-
+    const employeeId = await this.generateEmployeeId();
     const user = await this.prisma.user.create({
       data: {
-        employeeId: dto.employeeId,
+        employeeId,
         firstName: dto.firstName,
         lastName: dto.lastName,
         email: dto.email,
