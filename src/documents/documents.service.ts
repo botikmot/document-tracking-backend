@@ -381,15 +381,14 @@ export class DocumentsService {
 
   async update(
     id: string,
-
     dto: UpdateDocumentDto,
-
     currentUser: AuthenticatedUser,
   ) {
     const document = await this.prisma.document.findUnique({
       where: {
         id,
       },
+      include: { attachments: true },
     });
 
     if (!document) {
@@ -406,13 +405,32 @@ export class DocumentsService {
       throw new ForbiddenException('You cannot update this document');
     }
 
+    const { attachments, ...data } = dto;
+
     const updatedDocument = await this.prisma.document.update({
       where: {
         id,
       },
-
-      data: dto,
+      data,
     });
+
+    if (attachments && attachments.length > 0) {
+      await this.prisma.documentAttachment.deleteMany({
+        where: { documentId: id },
+      });
+
+      await this.prisma.documentAttachment.createMany({
+        data: attachments.map((file) => ({
+          documentId: id,
+          fileName: file.fileName,
+          filePath: file.filePath,
+          mimeType: file.mimeType,
+          fileSize: file.fileSize,
+          publicId: file.publicId,
+        })),
+        skipDuplicates: true,
+      });
+    }
 
     /*
      |--------------------------------------------------------------------------
@@ -1968,5 +1986,47 @@ export class DocumentsService {
       outgoingActiveRoute,
       activeRouting,
     };
+  }
+
+  async searchDocuments(user: any, q: string) {
+    if (!q || !q.trim()) {
+      return [];
+    }
+
+    const query = q.trim();
+
+    const documents = await this.prisma.document.findMany({
+      where: {
+        OR: [
+          {
+            trackingNumber: {
+              contains: query,
+              mode: 'insensitive',
+            },
+          },
+          {
+            title: {
+              contains: query,
+              mode: 'insensitive',
+            },
+          },
+        ],
+        // OPTIONAL: if you want to restrict by office/user access
+        // currentOfficeId: user.officeId,
+      },
+      select: {
+        id: true,
+        trackingNumber: true,
+        title: true,
+        currentStatusId: true,
+        createdAt: true,
+      },
+      take: 5,
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return documents;
   }
 }

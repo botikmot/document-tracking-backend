@@ -252,6 +252,22 @@ export class DocumentsController {
   }
 
   /*
+|--------------------------------------------------------------------------
+| SEARCH DOCUMENTS (GLOBAL SEARCH)
+|--------------------------------------------------------------------------
+*/
+
+  @Get('search')
+  @Roles('SUPER_ADMIN', 'OFFICE_ADMIN', 'SECRETARY', 'ENCODER', 'VIEWER')
+  searchDocuments(
+    @Req() req: AuthenticatedRequest,
+    @Query('q')
+    q: string,
+  ) {
+    return this.documentsService.searchDocuments(req.user, q);
+  }
+
+  /*
    |--------------------------------------------------------------------------
    | FIND ONE DOCUMENT
    |--------------------------------------------------------------------------
