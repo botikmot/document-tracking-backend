@@ -12,6 +12,29 @@ export class ReportsService {
   async generateReport(filter: ReportFilterDto) {
     const { startDate, endDate } = this.getDateRange(filter);
 
+    const documentInclude = {
+      currentStatus: true,
+      documentType: true,
+      currentOffice: true,
+    } satisfies Prisma.DocumentInclude;
+
+    const mapDocument = (
+      doc: Prisma.DocumentGetPayload<{
+        include: typeof documentInclude;
+      }>,
+    ) => ({
+      id: doc.id,
+      trackingNumber: doc.trackingNumber,
+      title: doc.title,
+      documentType: doc.documentType.name,
+      status: doc.currentStatus.name,
+      office: doc.currentOffice.officeName,
+      classification: doc.classification,
+      priority: doc.priority,
+      createdAt: doc.createdAt,
+      deadline: doc.deadline,
+    });
+
     /*
     |--------------------------------------------------------------------------
     | Dynamic Filters
@@ -80,7 +103,94 @@ export class ReportsService {
     |--------------------------------------------------------------------------
     */
 
-    const [
+    const incomingDocumentsData = await this.prisma.documentRoute.findMany({
+      where: incomingWhere,
+
+      include: {
+        document: {
+          include: documentInclude,
+        },
+      },
+    });
+
+    const incomingDocumentsList = incomingDocumentsData.map((route) =>
+      mapDocument(route.document),
+    );
+
+    const outgoingDocumentsData = await this.prisma.documentRoute.findMany({
+      where: outgoingWhere,
+
+      include: {
+        document: {
+          include: documentInclude,
+        },
+      },
+    });
+
+    const outgoingDocumentsList = outgoingDocumentsData.map((route) =>
+      mapDocument(route.document),
+    );
+
+    const pendingDocumentsData = await this.prisma.document.findMany({
+      where: {
+        ...documentWhere,
+
+        currentStatus: {
+          name: {
+            in: ['PENDING', 'FOR_REVIEW', 'FOR_APPROVAL', 'ON_PROCESS'],
+          },
+        },
+      },
+
+      include: documentInclude,
+    });
+
+    const pendingDocumentsList = pendingDocumentsData.map(mapDocument);
+
+    const completedDocumentsData = await this.prisma.document.findMany({
+      where: {
+        ...documentWhere,
+
+        currentStatus: {
+          name: 'COMPLETED',
+        },
+      },
+
+      include: documentInclude,
+    });
+
+    const completedDocumentsList = completedDocumentsData.map(mapDocument);
+
+    const overdueDocumentsData = await this.prisma.document.findMany({
+      where: {
+        ...documentWhere,
+
+        deadline: {
+          not: null,
+          lt: new Date(),
+        },
+
+        currentStatus: {
+          name: {
+            not: 'COMPLETED',
+          },
+        },
+      },
+
+      include: documentInclude,
+    });
+
+    const overdueDocumentsList = overdueDocumentsData.map(mapDocument);
+
+    const totalDocumentsData = await this.prisma.document.findMany({
+      where: documentWhere,
+
+      include: documentInclude,
+    });
+
+    const totalDocumentsList = totalDocumentsData.map(mapDocument);
+
+    /* const [
       incomingDocuments,
       outgoingDocuments,
       pendingDocuments,
@@ -138,7 +248,7 @@ export class ReportsService {
       this.prisma.document.count({
         where: documentWhere,
       }),
-    ]);
+    ]); */
 
     /*
     |--------------------------------------------------------------------------
@@ -311,6 +421,10 @@ export class ReportsService {
             }, 0) / completedDocumentsRaw.length,
           );
 
+    const totalDocuments = totalDocumentsData.length;
+
+    const completedDocuments = completedDocumentsData.length;
+
     const completionRate =
       totalDocuments === 0
         ? 0
@@ -323,12 +437,36 @@ export class ReportsService {
         endDate,
       },
       summary: {
-        totalDocuments,
-        incomingDocuments,
-        outgoingDocuments,
-        pendingDocuments,
-        completedDocuments,
-        overdueDocuments,
+        totalDocuments: {
+          count: totalDocuments,
+          documents: totalDocumentsList,
+        },
+
+        incomingDocuments: {
+          count: incomingDocumentsData.length,
+          documents: incomingDocumentsList,
+        },
+
+        outgoingDocuments: {
+          count: outgoingDocumentsData.length,
+          documents: outgoingDocumentsList,
+        },
+
+        pendingDocuments: {
+          count: pendingDocumentsData.length,
+          documents: pendingDocumentsList,
+        },
+
+        completedDocuments: {
+          count: completedDocuments,
+          documents: completedDocumentsList,
+        },
+
+        overdueDocuments: {
+          count: overdueDocumentsData.length,
+          documents: overdueDocumentsList,
+        },
+
         completionRate,
         averageProcessingHours,
       },
