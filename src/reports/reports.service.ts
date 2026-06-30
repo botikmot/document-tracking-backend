@@ -346,6 +346,7 @@ export class ReportsService {
         documentType: doc.documentType.name,
         status: doc.currentStatus.name,
         office: doc.currentOffice.officeName,
+        classification: doc.classification,
         priority: doc.priority,
         createdAt: doc.createdAt,
         deadline: doc.deadline,
