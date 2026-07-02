@@ -58,6 +58,21 @@ model User {
 
   logs DocumentLog[]
   notifications Notification[]
+  settings UserSettings?
+}
+
+model UserSettings {
+  id String @id @default(uuid())
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  emailNotifications Boolean @default(true)
+  smsNotifications   Boolean @default(false)
+  darkMode           Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Role {

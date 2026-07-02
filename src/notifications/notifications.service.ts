@@ -21,7 +21,7 @@ export class NotificationsService {
    |-------------------------------------------------------------
    */
 
-  @Cron('0 * * * *') // every hour
+  @Cron('* * * * *') // every hour
   async checkDeadlines() {
     const now = new Date();
     console.log('CRON RUNNING...');
@@ -100,13 +100,24 @@ export class NotificationsService {
         if (!officeUser.user.email) continue;
 
         try {
-          await this.mailService.sendDeadlineReminder(
-            officeUser.user.email,
-            doc.title,
-            doc.deadline!,
-          );
+          const settings = await this.prisma.userSettings.upsert({
+            where: {
+              userId: officeUser.userId,
+            },
+            update: {},
+            create: {
+              userId: officeUser.userId,
+            },
+          });
 
-          console.log(`Email sent to ${officeUser.user.email}`);
+          if (settings?.emailNotifications) {
+            await this.mailService.sendDeadlineReminder(
+              officeUser.user.email,
+              doc.title,
+              doc.deadline!,
+            );
+            console.log(`Email sent to ${officeUser.user.email}`);
+          }
         } catch (error) {
           console.error(
             `Failed to send email to ${officeUser.user.email}`,
