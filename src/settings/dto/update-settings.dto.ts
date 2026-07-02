@@ -12,4 +12,8 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsBoolean()
   darkMode?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  notificationSounds?: boolean;
 }

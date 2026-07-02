@@ -70,6 +70,7 @@ model UserSettings {
   emailNotifications Boolean @default(true)
   smsNotifications   Boolean @default(false)
   darkMode           Boolean @default(false)
+  notificationSounds Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
