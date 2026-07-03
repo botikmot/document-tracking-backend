@@ -36,6 +36,11 @@ enum MemberRole {
   MEMBER
 }
 
+enum CommunityType {
+  CHANNEL
+  DIRECT
+}
+
 model User {
   id           String     @id @default(uuid())
   employeeId   String?    @unique
@@ -312,6 +317,8 @@ model Community {
   name        String
 
   description String?
+
+  type CommunityType @default(CHANNEL)
 
   isGeneral   Boolean @default(false)
 

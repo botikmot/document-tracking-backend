@@ -58,7 +58,15 @@ export class CommunityService {
       include: {
         members: {
           include: {
-            user: true,
+            user: {
+              include: {
+                offices: {
+                  include: {
+                    office: true,
+                  },
+                },
+              },
+            },
           },
         },
         _count: {
@@ -349,5 +357,117 @@ export class CommunityService {
         },
       },
     });
+  }
+
+  async createDirectConversation(currentUserId: string, targetUserId: string) {
+    if (currentUserId === targetUserId) {
+      throw new BadRequestException('Cannot message yourself.');
+    }
+
+    const target = await this.prisma.user.findUnique({
+      where: {
+        id: targetUserId,
+      },
+    });
+
+    if (!target) {
+      throw new NotFoundException('User not found.');
+    }
+
+    const existing = await this.prisma.community.findFirst({
+      where: {
+        type: 'DIRECT',
+
+        AND: [
+          {
+            members: {
+              some: {
+                userId: currentUserId,
+              },
+            },
+          },
+          {
+            members: {
+              some: {
+                userId: targetUserId,
+              },
+            },
+          },
+        ],
+      },
+
+      include: {
+        members: {
+          include: {
+            user: {
+              include: {
+                offices: {
+                  include: {
+                    office: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        _count: {
+          select: {
+            members: true,
+          },
+        },
+      },
+    });
+
+    if (existing && existing.members.length === 2) {
+      return existing;
+    }
+
+    const community = await this.prisma.community.create({
+      data: {
+        type: 'DIRECT',
+
+        isPrivate: true,
+
+        name: '',
+
+        members: {
+          create: [
+            {
+              userId: currentUserId,
+              role: 'MEMBER',
+            },
+            {
+              userId: targetUserId,
+              role: 'MEMBER',
+            },
+          ],
+        },
+      },
+
+      include: {
+        members: {
+          include: {
+            user: {
+              include: {
+                offices: {
+                  include: {
+                    office: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        _count: {
+          select: {
+            members: true,
+          },
+        },
+      },
+    });
+
+    return community;
   }
 }

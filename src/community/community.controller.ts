@@ -17,6 +17,7 @@ import { CreateCommunityDto } from './dto/create-community.dto';
 import { UpdateCommunityDto } from './dto/update-community.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
+import { CreateDirectDto } from './dto/create-direct.dto';
 
 @Controller('communities')
 @UseGuards(JwtAuthGuard)
@@ -35,6 +36,14 @@ export class CommunityController {
   @Post()
   create(@Req() req: AuthenticatedRequest, @Body() dto: CreateCommunityDto) {
     return this.communityService.create(req.user.userId, dto);
+  }
+
+  @Post('direct')
+  createDirect(@Req() req: AuthenticatedRequest, @Body() dto: CreateDirectDto) {
+    return this.communityService.createDirectConversation(
+      req.user.userId,
+      dto.targetUserId,
+    );
   }
 
   @Patch(':id')
