@@ -30,6 +30,12 @@ enum OfficeCategory {
   RECORDS
 }
 
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
 model User {
   id           String     @id @default(uuid())
   employeeId   String?    @unique
@@ -59,6 +65,9 @@ model User {
   logs DocumentLog[]
   notifications Notification[]
   settings UserSettings?
+  ownedCommunities Community[] @relation("CommunityOwner")
+  communityMemberships CommunityMember[]
+  communityMessages CommunityMessage[]
 }
 
 model UserSettings {
@@ -294,4 +303,67 @@ model Notification {
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Community {
+
+  id          String   @id @default(cuid())
+
+  name        String
+
+  description String?
+
+  isGeneral   Boolean @default(false)
+
+  isPrivate   Boolean @default(false)
+
+  ownerId     String?
+
+  owner        User? @relation("CommunityOwner", fields:[ownerId], references:[id])
+
+  createdAt   DateTime @default(now())
+
+  members CommunityMember[]
+
+  messages CommunityMessage[]
+}
+
+model CommunityMember {
+
+  id String @id @default(cuid())
+
+  communityId String
+
+  userId String
+
+  role MemberRole @default(MEMBER)
+
+  community Community @relation(fields:[communityId], references:[id])
+
+  user User @relation(fields:[userId], references:[id])
+
+  joinedAt DateTime @default(now())
+
+  @@unique([communityId,userId], name: "communityId_userId")
+
+}
+
+model CommunityMessage {
+
+  id String @id @default(cuid())
+
+  message String
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  userId String
+
+  communityId String
+
+  user User @relation(fields:[userId], references:[id])
+
+  community Community @relation(fields:[communityId], references:[id])
+
 }

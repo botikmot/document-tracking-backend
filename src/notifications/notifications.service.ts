@@ -21,7 +21,7 @@ export class NotificationsService {
    |-------------------------------------------------------------
    */
 
-  @Cron('* * * * *') // every hour
+  @Cron('0 * * * *') // every hour
   async checkDeadlines() {
     const now = new Date();
     console.log('CRON RUNNING...');

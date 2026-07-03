@@ -16,6 +16,7 @@ import { MailModule } from './mail/mail.module';
 import { SmsModule } from './sms/sms.module';
 import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
+import { CommunityModule } from './community/community.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { SettingsModule } from './settings/settings.module';
     SmsModule,
     ReportsModule,
     SettingsModule,
+    CommunityModule,
   ],
   controllers: [AppController],
   providers: [AppService],
