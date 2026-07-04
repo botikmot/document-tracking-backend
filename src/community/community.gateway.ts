@@ -43,6 +43,27 @@ export class CommunityGateway
    */
   private onlineUsers = new Map<string, OnlineUser>();
 
+  private async emitUnreadUpdates(communityId: string, senderId: string) {
+    const members =
+      await this.communityService.getCommunityMembers(communityId);
+
+    for (const member of members) {
+      if (member.userId === senderId) {
+        continue;
+      }
+
+      const unread = await this.communityService.getUnreadCount(
+        member.userId,
+        communityId,
+      );
+
+      this.sendToUser(member.userId, 'community-unread', {
+        communityId,
+        unreadCount: unread,
+      });
+    }
+  }
+
   // =====================================================
   // CONNECTION
   // =====================================================
@@ -141,6 +162,21 @@ export class CommunityGateway
     );
 
     this.server.to(payload.communityId).emit('new-message', newMessage);
+
+    //await this.emitUnreadUpdates(payload.communityId, payload.userId);
+    const members = await this.communityService.getCommunityMembers(
+      payload.communityId,
+    );
+
+    for (const member of members) {
+      if (member.userId === payload.userId) {
+        continue;
+      }
+
+      this.sendToUser(member.userId, 'community-unread', {
+        communityId: payload.communityId,
+      });
+    }
 
     return newMessage;
   }

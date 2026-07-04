@@ -99,6 +99,11 @@ export class CommunityController {
     return this.communityService.sendMessage(req.user.userId, id, dto);
   }
 
+  @Post(':id/read')
+  markAsRead(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.communityService.markAsRead(req.user.userId, id);
+  }
+
   // ============================
   // MEMBERS
   // ============================

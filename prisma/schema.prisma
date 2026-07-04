@@ -73,6 +73,7 @@ model User {
   ownedCommunities Community[] @relation("CommunityOwner")
   communityMemberships CommunityMember[]
   communityMessages CommunityMessage[]
+  communityReads CommunityRead[]
 }
 
 model UserSettings {
@@ -333,6 +334,7 @@ model Community {
   members CommunityMember[]
 
   messages CommunityMessage[]
+  reads CommunityRead[]
 }
 
 model CommunityMember {
@@ -373,4 +375,18 @@ model CommunityMessage {
 
   community Community @relation(fields:[communityId], references:[id], onDelete: Cascade)
 
+}
+
+model CommunityRead {
+  id          String   @id @default(cuid())
+
+  communityId String
+  userId      String
+
+  lastReadAt  DateTime @default(now())
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId], name: "communityId_userId")
 }

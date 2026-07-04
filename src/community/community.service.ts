@@ -122,10 +122,26 @@ export class CommunityService {
       },
     });
 
-    return this.prisma.community.findMany({
+    await this.prisma.communityRead.upsert({
+      where: {
+        communityId_userId: {
+          communityId: general.id,
+          userId,
+        },
+      },
+
+      update: {},
+
+      create: {
+        communityId: general.id,
+        userId,
+        lastReadAt: new Date(),
+      },
+    });
+
+    const communities = await this.prisma.community.findMany({
       where: {
         type: 'CHANNEL',
-
         members: {
           some: {
             userId,
@@ -154,6 +170,19 @@ export class CommunityService {
             messages: true,
           },
         },
+
+        reads: {
+          where: {
+            userId,
+          },
+        },
+
+        messages: {
+          select: {
+            id: true,
+            createdAt: true,
+          },
+        },
       },
 
       orderBy: [
@@ -165,10 +194,26 @@ export class CommunityService {
         },
       ],
     });
+
+    const result = communities.map((community) => {
+      const read = community.reads[0];
+
+      const unreadCount = community.messages.filter(
+        (message) => !read || message.createdAt > read.lastReadAt,
+      ).length;
+
+      return {
+        ...community,
+
+        unreadCount,
+      };
+    });
+
+    return result;
   }
 
   async create(ownerId: string, dto: CreateCommunityDto) {
-    return this.prisma.community.create({
+    const community = await this.prisma.community.create({
       data: {
         name: dto.name,
         description: dto.description,
@@ -182,22 +227,49 @@ export class CommunityService {
               role: MemberRole.OWNER,
             },
 
-            ...(dto.memberIds ?? []).map((id) => ({
-              userId: id,
+            ...(dto.memberIds ?? []).map((userId) => ({
+              userId,
               role: MemberRole.MEMBER,
             })),
           ],
         },
       },
+
       include: {
         owner: true,
+
         members: {
           include: {
-            user: true,
+            user: {
+              include: {
+                offices: {
+                  include: {
+                    office: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        _count: {
+          select: {
+            members: true,
+            messages: true,
           },
         },
       },
     });
+
+    await this.prisma.communityRead.create({
+      data: {
+        communityId: community.id,
+        userId: ownerId,
+        lastReadAt: new Date(),
+      },
+    });
+
+    return community;
   }
 
   async update(communityId: string, userId: string, dto: UpdateCommunityDto) {
@@ -622,6 +694,63 @@ export class CommunityService {
             members: true,
             messages: true,
           },
+        },
+      },
+    });
+  }
+
+  async markAsRead(userId: string, communityId: string) {
+    return this.prisma.communityRead.upsert({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId,
+        },
+      },
+
+      update: {
+        lastReadAt: new Date(),
+      },
+
+      create: {
+        communityId,
+        userId,
+        lastReadAt: new Date(),
+      },
+    });
+  }
+
+  async getCommunityMembers(communityId: string) {
+    return this.prisma.communityMember.findMany({
+      where: {
+        communityId,
+      },
+      select: {
+        userId: true,
+      },
+    });
+  }
+
+  async getUnreadCount(userId: string, communityId: string) {
+    const read = await this.prisma.communityRead.findUnique({
+      where: {
+        communityId_userId: {
+          communityId,
+          userId,
+        },
+      },
+    });
+
+    return this.prisma.communityMessage.count({
+      where: {
+        communityId,
+
+        createdAt: {
+          gt: read?.lastReadAt ?? new Date(0),
+        },
+
+        userId: {
+          not: userId,
         },
       },
     });
