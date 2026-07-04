@@ -46,6 +46,11 @@ export class CommunityController {
     );
   }
 
+  @Get('users')
+  getUsers(@Req() req: AuthenticatedRequest) {
+    return this.communityService.findAllUsers(req.user.userId);
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateCommunityDto) {
     return this.communityService.update(id, dto);

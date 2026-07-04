@@ -55,6 +55,9 @@ export class CommunityService {
     });
 
     return this.prisma.community.findMany({
+      where: {
+        type: 'CHANNEL',
+      },
       include: {
         members: {
           include: {
@@ -469,5 +472,29 @@ export class CommunityService {
     });
 
     return community;
+  }
+
+  async findAllUsers(currentUserId: string) {
+    return this.prisma.user.findMany({
+      where: {
+        id: {
+          not: currentUserId,
+        },
+      },
+      orderBy: {
+        firstName: 'asc',
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        profileImageUrl: true,
+        offices: {
+          include: {
+            office: true,
+          },
+        },
+      },
+    });
   }
 }
