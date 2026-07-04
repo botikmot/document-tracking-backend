@@ -1,4 +1,10 @@
-import { IsOptional, IsString, IsBoolean } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsBoolean,
+  IsArray,
+  ArrayUnique,
+} from 'class-validator';
 
 export class CreateCommunityDto {
   @IsString()
@@ -10,4 +16,10 @@ export class CreateCommunityDto {
 
   @IsBoolean()
   isPrivate!: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  memberIds?: string[];
 }

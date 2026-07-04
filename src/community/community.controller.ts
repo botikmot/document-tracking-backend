@@ -18,6 +18,7 @@ import { UpdateCommunityDto } from './dto/update-community.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { CreateDirectDto } from './dto/create-direct.dto';
+import { AddMembersDto } from './dto/add-members.dto';
 
 @Controller('communities')
 @UseGuards(JwtAuthGuard)
@@ -51,14 +52,23 @@ export class CommunityController {
     return this.communityService.findAllUsers(req.user.userId);
   }
 
+  @Get(':id')
+  findOne(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.communityService.findOne(id, req.user.userId);
+  }
+
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateCommunityDto) {
-    return this.communityService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: UpdateCommunityDto,
+  ) {
+    return this.communityService.update(id, req.user.userId, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.communityService.remove(id);
+  remove(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.communityService.remove(id, req.user.userId);
   }
 
   // ============================
@@ -108,8 +118,21 @@ export class CommunityController {
     return this.communityService.invite(id, dto.userId);
   }
 
-  @Delete(':id/member/:userId')
-  removeMember(@Param('id') id: string, @Param('userId') userId: string) {
-    return this.communityService.removeMember(id, userId);
+  @Delete(':id/member/:memberId')
+  removeMember(
+    @Param('id') id: string,
+    @Param('memberId') memberId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.communityService.removeMember(id, req.user.userId, memberId);
+  }
+
+  @Post(':id/members')
+  addMembers(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: AddMembersDto,
+  ) {
+    return this.communityService.addMembers(id, req.user.userId, dto.memberIds);
   }
 }
