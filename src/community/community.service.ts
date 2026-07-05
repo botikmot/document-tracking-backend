@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { UpdateCommunityDto } from './dto/update-community.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
+import { UpdateMessageDto } from './dto/update-message.dto';
 
 @Injectable()
 export class CommunityService {
@@ -834,5 +835,100 @@ export class CommunityService {
         },
       },
     });
+  }
+
+  async updateMessage(
+    userId: string,
+    messageId: string,
+    dto: UpdateMessageDto,
+  ) {
+    const message = await this.prisma.communityMessage.findUnique({
+      where: {
+        id: messageId,
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found.');
+    }
+
+    if (message.userId !== userId) {
+      throw new ForbiddenException('You can only edit your own message.');
+    }
+
+    if (message.isDeleted) {
+      throw new BadRequestException('Message has already been deleted.');
+    }
+
+    const updated = await this.prisma.communityMessage.update({
+      where: {
+        id: messageId,
+      },
+
+      data: {
+        message: dto.message,
+        editedAt: new Date(),
+      },
+
+      include: {
+        user: {
+          include: {
+            offices: {
+              include: {
+                office: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return updated;
+  }
+
+  async deleteMessage(userId: string, messageId: string) {
+    const message = await this.prisma.communityMessage.findUnique({
+      where: {
+        id: messageId,
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found.');
+    }
+
+    if (message.userId !== userId) {
+      throw new ForbiddenException('You can only delete your own message.');
+    }
+
+    if (message.isDeleted) {
+      throw new BadRequestException('Message already deleted.');
+    }
+
+    const deleted = await this.prisma.communityMessage.update({
+      where: {
+        id: messageId,
+      },
+
+      data: {
+        isDeleted: true,
+
+        message: 'This message was deleted.',
+      },
+
+      include: {
+        user: {
+          include: {
+            offices: {
+              include: {
+                office: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return deleted;
   }
 }

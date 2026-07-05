@@ -367,6 +367,10 @@ model CommunityMessage {
 
   updatedAt DateTime @updatedAt
 
+  editedAt DateTime?
+
+  isDeleted Boolean @default(false)
+
   userId String
 
   communityId String

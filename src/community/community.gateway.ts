@@ -227,4 +227,16 @@ export class CommunityGateway
   getOnlineUsers() {
     return Array.from(this.onlineUsers.values());
   }
+
+  // =====================================================
+  // MESSAGE EVENTS
+  // =====================================================
+
+  broadcastMessageUpdated(communityId: string, message: unknown) {
+    this.server.to(communityId).emit('message-updated', message);
+  }
+
+  broadcastMessageDeleted(communityId: string, message: unknown) {
+    this.server.to(communityId).emit('message-deleted', message);
+  }
 }

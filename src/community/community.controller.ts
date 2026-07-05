@@ -19,11 +19,16 @@ import { CreateMessageDto } from './dto/create-message.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { CreateDirectDto } from './dto/create-direct.dto';
 import { AddMembersDto } from './dto/add-members.dto';
+import { UpdateMessageDto } from './dto/update-message.dto';
+import { CommunityGateway } from './community.gateway';
 
 @Controller('communities')
 @UseGuards(JwtAuthGuard)
 export class CommunityController {
-  constructor(private readonly communityService: CommunityService) {}
+  constructor(
+    private readonly communityService: CommunityService,
+    private readonly communityGateway: CommunityGateway,
+  ) {}
 
   // ============================
   // COMMUNITY
@@ -74,6 +79,44 @@ export class CommunityController {
   // ============================
   // MESSAGES
   // ============================
+
+  @Patch('messages/:messageId')
+  async updateMessage(
+    @Req() req: AuthenticatedRequest,
+
+    @Param('messageId')
+    messageId: string,
+
+    @Body()
+    dto: UpdateMessageDto,
+  ) {
+    const updated = await this.communityService.updateMessage(
+      req.user.userId,
+      messageId,
+      dto,
+    );
+
+    this.communityGateway.broadcastMessageUpdated(updated.communityId, updated);
+
+    return updated;
+  }
+
+  @Delete('messages/:messageId')
+  async deleteMessage(
+    @Req() req: AuthenticatedRequest,
+
+    @Param('messageId')
+    messageId: string,
+  ) {
+    const deleted = await this.communityService.deleteMessage(
+      req.user.userId,
+      messageId,
+    );
+
+    this.communityGateway.broadcastMessageDeleted(deleted.communityId, deleted);
+
+    return deleted;
+  }
 
   @Get(':id/messages')
   getMessages(
