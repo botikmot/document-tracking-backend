@@ -627,11 +627,26 @@ export class CommunityService {
       },
     });
 
+    await this.prisma.communityRead.createMany({
+      data: [
+        {
+          communityId: community.id,
+          userId: currentUserId,
+          lastReadAt: new Date(),
+        },
+        {
+          communityId: community.id,
+          userId: targetUserId,
+          lastReadAt: new Date(),
+        },
+      ],
+    });
+
     return community;
   }
 
   async findAllUsers(currentUserId: string) {
-    return this.prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where: {
         id: {
           not: currentUserId,
@@ -652,6 +667,71 @@ export class CommunityService {
         },
       },
     });
+
+    const result = await Promise.all(
+      users.map(async (user) => {
+        const direct = await this.prisma.community.findFirst({
+          where: {
+            type: 'DIRECT',
+
+            AND: [
+              {
+                members: {
+                  some: {
+                    userId: currentUserId,
+                  },
+                },
+              },
+
+              {
+                members: {
+                  some: {
+                    userId: user.id,
+                  },
+                },
+              },
+            ],
+          },
+
+          include: {
+            reads: {
+              where: {
+                userId: currentUserId,
+              },
+            },
+
+            messages: {
+              select: {
+                createdAt: true,
+                userId: true,
+              },
+            },
+          },
+        });
+
+        let unreadCount = 0;
+
+        if (direct) {
+          const read = direct.reads[0];
+
+          unreadCount = direct.messages.filter(
+            (m) =>
+              m.userId !== currentUserId &&
+              (!read || m.createdAt > read.lastReadAt),
+          ).length;
+        }
+
+        return {
+          ...user,
+
+          directCommunityId: direct?.id ?? null,
+
+          unreadCount,
+        };
+      }),
+    );
+
+    return result;
   }
 
   async addMembers(communityId: string, userId: string, memberIds: string[]) {

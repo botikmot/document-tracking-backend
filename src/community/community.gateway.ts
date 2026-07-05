@@ -173,8 +173,14 @@ export class CommunityGateway
         continue;
       }
 
+      const unread = await this.communityService.getUnreadCount(
+        member.userId,
+        payload.communityId,
+      );
+
       this.sendToUser(member.userId, 'community-unread', {
         communityId: payload.communityId,
+        unreadCount: unread,
       });
     }
 
