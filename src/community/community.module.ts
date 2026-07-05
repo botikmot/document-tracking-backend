@@ -6,5 +6,6 @@ import { CommunityGateway } from './community.gateway';
 @Module({
   controllers: [CommunityController],
   providers: [CommunityService, CommunityGateway],
+  exports: [CommunityService, CommunityGateway],
 })
 export class CommunityModule {}

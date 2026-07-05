@@ -12,6 +12,7 @@ import { CreateCommunityDto } from './dto/create-community.dto';
 import { UpdateCommunityDto } from './dto/update-community.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { UpdateMessageDto } from './dto/update-message.dto';
+import { ToggleReactionDto } from './dto/toggle-reaction.dto';
 
 @Injectable()
 export class CommunityService {
@@ -342,6 +343,17 @@ export class CommunityService {
               },
             },
           },
+          reactions: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+          },
         },
 
         orderBy: {
@@ -374,6 +386,17 @@ export class CommunityService {
             offices: {
               include: {
                 office: true,
+              },
+            },
+          },
+        },
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
               },
             },
           },
@@ -880,6 +903,17 @@ export class CommunityService {
             },
           },
         },
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -930,5 +964,83 @@ export class CommunityService {
     });
 
     return deleted;
+  }
+
+  async toggleReaction(
+    userId: string,
+    messageId: string,
+    dto: ToggleReactionDto,
+  ) {
+    const message = await this.prisma.communityMessage.findUnique({
+      where: {
+        id: messageId,
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found.');
+    }
+
+    await this.ensureMember(message.communityId, userId);
+
+    const existing = await this.prisma.messageReaction.findFirst({
+      where: {
+        messageId,
+        userId,
+        emoji: dto.emoji,
+      },
+    });
+
+    if (existing) {
+      await this.prisma.messageReaction.delete({
+        where: {
+          id: existing.id,
+        },
+      });
+    } else {
+      await this.prisma.messageReaction.create({
+        data: {
+          messageId,
+          userId,
+          emoji: dto.emoji,
+        },
+      });
+    }
+
+    const updatedMessage = await this.prisma.communityMessage.findUnique({
+      where: {
+        id: messageId,
+      },
+
+      include: {
+        user: {
+          include: {
+            offices: {
+              include: {
+                office: true,
+              },
+            },
+          },
+        },
+
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!updatedMessage) {
+      throw new NotFoundException('Message not found.');
+    }
+
+    return updatedMessage;
   }
 }

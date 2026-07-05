@@ -21,6 +21,7 @@ import { CreateDirectDto } from './dto/create-direct.dto';
 import { AddMembersDto } from './dto/add-members.dto';
 import { UpdateMessageDto } from './dto/update-message.dto';
 import { CommunityGateway } from './community.gateway';
+import { ToggleReactionDto } from './dto/toggle-reaction.dto';
 
 @Controller('communities')
 @UseGuards(JwtAuthGuard)
@@ -116,6 +117,30 @@ export class CommunityController {
     this.communityGateway.broadcastMessageDeleted(deleted.communityId, deleted);
 
     return deleted;
+  }
+
+  @Post('messages/:messageId/reactions')
+  async toggleReaction(
+    @Req() req: AuthenticatedRequest,
+
+    @Param('messageId')
+    messageId: string,
+
+    @Body()
+    dto: ToggleReactionDto,
+  ) {
+    const updated = await this.communityService.toggleReaction(
+      req.user.userId,
+      messageId,
+      dto,
+    );
+
+    this.communityGateway.broadcastReactionUpdated(
+      updated.communityId,
+      updated,
+    );
+
+    return updated;
   }
 
   @Get(':id/messages')

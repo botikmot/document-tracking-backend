@@ -74,6 +74,7 @@ model User {
   communityMemberships CommunityMember[]
   communityMessages CommunityMessage[]
   communityReads CommunityRead[]
+  messageReactions MessageReaction[]
 }
 
 model UserSettings {
@@ -379,6 +380,8 @@ model CommunityMessage {
 
   community Community @relation(fields:[communityId], references:[id], onDelete: Cascade)
 
+  reactions MessageReaction[]
+
 }
 
 model CommunityRead {
@@ -393,4 +396,20 @@ model CommunityRead {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([communityId, userId], name: "communityId_userId")
+}
+
+model MessageReaction {
+  id        String   @id @default(cuid())
+
+  messageId String
+  userId    String
+
+  emoji     String
+
+  createdAt DateTime @default(now())
+
+  message CommunityMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
 }

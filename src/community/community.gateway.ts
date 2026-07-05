@@ -239,4 +239,8 @@ export class CommunityGateway
   broadcastMessageDeleted(communityId: string, message: unknown) {
     this.server.to(communityId).emit('message-deleted', message);
   }
+
+  broadcastReactionUpdated(communityId: string, message: any) {
+    this.server.to(communityId).emit('reaction-updated', message);
+  }
 }
