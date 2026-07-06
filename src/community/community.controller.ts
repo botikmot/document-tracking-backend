@@ -9,6 +9,8 @@ import {
   UseGuards,
   Query,
   Req,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CommunityService } from './community.service';
@@ -22,6 +24,9 @@ import { AddMembersDto } from './dto/add-members.dto';
 import { UpdateMessageDto } from './dto/update-message.dto';
 import { CommunityGateway } from './community.gateway';
 import { ToggleReactionDto } from './dto/toggle-reaction.dto';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 
 @Controller('communities')
 @UseGuards(JwtAuthGuard)
@@ -80,6 +85,37 @@ export class CommunityController {
   // ============================
   // MESSAGES
   // ============================
+
+  @Post('messages/upload')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './uploads/community',
+
+        filename: (req, file, callback) => {
+          const filename = `${Date.now()}-${file.originalname}`;
+
+          callback(null, filename);
+        },
+      }),
+    }),
+  )
+  uploadFile(
+    @UploadedFile()
+    file: Express.Multer.File,
+  ) {
+    return {
+      filename: file.filename,
+
+      originalName: file.originalname,
+
+      path: `/uploads/community/${file.filename}`,
+
+      mimeType: file.mimetype,
+
+      size: file.size,
+    };
+  }
 
   @Patch('messages/:messageId')
   async updateMessage(
@@ -159,12 +195,35 @@ export class CommunityController {
   }
 
   @Post(':id/messages')
-  sendMessage(
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './uploads/community',
+
+        filename: (req, file, cb) => {
+          const uniqueName = `${Date.now()}${extname(file.originalname)}`;
+
+          cb(null, uniqueName);
+        },
+      }),
+    }),
+  )
+  async sendMessage(
     @Req() req: AuthenticatedRequest,
     @Param('id') id: string,
     @Body() dto: CreateMessageDto,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.communityService.sendMessage(req.user.userId, id, dto);
+    const message = await this.communityService.sendMessage(
+      req.user.userId,
+      id,
+      dto,
+      file,
+    );
+
+    this.communityGateway.broadcastNewMessage(id, message);
+
+    return message;
   }
 
   @Post(':id/read')

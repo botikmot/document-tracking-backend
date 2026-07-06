@@ -354,6 +354,7 @@ export class CommunityService {
               },
             },
           },
+          attachments: true,
         },
 
         orderBy: {
@@ -371,15 +372,48 @@ export class CommunityService {
     userId: string,
     communityId: string,
     dto: CreateMessageDto,
+    file?: Express.Multer.File,
   ) {
     await this.ensureMember(communityId, userId);
 
-    return this.prisma.communityMessage.create({
+    // ------------------------------------
+    // Create the message first
+    // ------------------------------------
+
+    const message = await this.prisma.communityMessage.create({
       data: {
-        message: dto.message,
+        message: dto.message ?? '',
         communityId,
         userId,
       },
+    });
+
+    // ------------------------------------
+    // Save attachment (if any)
+    // ------------------------------------
+
+    if (file) {
+      await this.prisma.communityAttachment.create({
+        data: {
+          messageId: message.id,
+          fileName: file.filename,
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+          fileSize: file.size,
+          path: `/uploads/community/${file.filename}`,
+        },
+      });
+    }
+
+    // ------------------------------------
+    // Return complete message
+    // ------------------------------------
+
+    return this.prisma.communityMessage.findUnique({
+      where: {
+        id: message.id,
+      },
+
       include: {
         user: {
           include: {
@@ -390,6 +424,7 @@ export class CommunityService {
             },
           },
         },
+
         reactions: {
           include: {
             user: {
@@ -401,6 +436,8 @@ export class CommunityService {
             },
           },
         },
+
+        attachments: true,
       },
     });
   }
@@ -1034,6 +1071,7 @@ export class CommunityService {
             },
           },
         },
+        attachments: true,
       },
     });
 

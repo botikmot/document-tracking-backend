@@ -382,6 +382,8 @@ model CommunityMessage {
 
   reactions MessageReaction[]
 
+  attachments CommunityAttachment[]
+
 }
 
 model CommunityRead {
@@ -412,4 +414,23 @@ model MessageReaction {
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId, emoji])
+}
+
+model CommunityAttachment {
+  id String @id @default(cuid())
+
+  messageId String
+
+  fileName String
+  originalName String
+
+  mimeType String
+
+  fileSize Int
+
+  path String
+
+  createdAt DateTime @default(now())
+
+  message CommunityMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
 }

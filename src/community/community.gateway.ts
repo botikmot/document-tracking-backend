@@ -243,4 +243,8 @@ export class CommunityGateway
   broadcastReactionUpdated(communityId: string, message: any) {
     this.server.to(communityId).emit('reaction-updated', message);
   }
+
+  broadcastNewMessage(communityId: string, message: any) {
+    this.server.to(communityId).emit('new-message', message);
+  }
 }
