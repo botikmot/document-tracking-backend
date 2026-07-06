@@ -179,12 +179,12 @@ export class CommunityService {
           },
         },
 
-        messages: {
+        /* messages: {
           select: {
             id: true,
             createdAt: true,
           },
-        },
+        }, */
       },
 
       orderBy: [
@@ -197,19 +197,30 @@ export class CommunityService {
       ],
     });
 
-    const result = communities.map((community) => {
-      const read = community.reads[0];
+    const result = await Promise.all(
+      communities.map(async (community) => {
+        const read = community.reads[0];
 
-      const unreadCount = community.messages.filter(
-        (message) => !read || message.createdAt > read.lastReadAt,
-      ).length;
+        const unreadCount = await this.prisma.communityMessage.count({
+          where: {
+            communityId: community.id,
 
-      return {
-        ...community,
+            createdAt: {
+              gt: read?.lastReadAt ?? new Date(0),
+            },
 
-        unreadCount,
-      };
-    });
+            userId: {
+              not: userId,
+            },
+          },
+        });
+
+        return {
+          ...community,
+          unreadCount,
+        };
+      }),
+    );
 
     return result;
   }
