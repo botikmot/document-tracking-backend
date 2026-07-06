@@ -223,6 +223,8 @@ export class CommunityController {
 
     this.communityGateway.broadcastNewMessage(id, message);
 
+    await this.communityGateway.broadcastCommunityUnread(id, req.user.userId);
+
     return message;
   }
 

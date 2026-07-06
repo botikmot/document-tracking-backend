@@ -247,4 +247,25 @@ export class CommunityGateway
   broadcastNewMessage(communityId: string, message: any) {
     this.server.to(communityId).emit('new-message', message);
   }
+
+  async broadcastCommunityUnread(communityId: string, senderId: string) {
+    const members =
+      await this.communityService.getCommunityMembers(communityId);
+
+    for (const member of members) {
+      if (member.userId === senderId) {
+        continue;
+      }
+
+      const unread = await this.communityService.getUnreadCount(
+        member.userId,
+        communityId,
+      );
+
+      this.sendToUser(member.userId, 'community-unread', {
+        communityId,
+        unreadCount: unread,
+      });
+    }
+  }
 }

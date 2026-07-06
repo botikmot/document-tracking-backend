@@ -178,13 +178,6 @@ export class CommunityService {
             userId,
           },
         },
-
-        /* messages: {
-          select: {
-            id: true,
-            createdAt: true,
-          },
-        }, */
       },
 
       orderBy: [
