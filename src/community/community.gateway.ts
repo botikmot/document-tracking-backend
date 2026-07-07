@@ -161,6 +161,11 @@ export class CommunityGateway
       dto,
     );
 
+    this.server.to(payload.communityId).emit('user-stop-typing', {
+      communityId: payload.communityId,
+      userId: payload.userId,
+    });
+
     this.server.to(payload.communityId).emit('new-message', newMessage);
 
     //await this.emitUnreadUpdates(payload.communityId, payload.userId);
@@ -185,6 +190,38 @@ export class CommunityGateway
     }
 
     return newMessage;
+  }
+
+  // =====================================================
+  // TYPING START
+  // =====================================================
+
+  @SubscribeMessage('typing-start')
+  handleTypingStart(
+    @MessageBody()
+    payload: {
+      communityId: string;
+      userId: string;
+      firstName: string;
+      lastName: string;
+    },
+  ) {
+    this.server.to(payload.communityId).emit('user-typing', payload);
+  }
+
+  // =====================================================
+  // TYPING STOP
+  // =====================================================
+
+  @SubscribeMessage('typing-stop')
+  handleTypingStop(
+    @MessageBody()
+    payload: {
+      communityId: string;
+      userId: string;
+    },
+  ) {
+    this.server.to(payload.communityId).emit('user-stop-typing', payload);
   }
 
   // =====================================================
