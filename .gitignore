@@ -2,7 +2,16 @@
 /dist
 /node_modules
 /build
-/uploads/
+
+# Uploads
+/uploads/**
+
+# Keep folders
+!/uploads/
+!/uploads/.gitkeep
+
+!/uploads/community/
+!/uploads/community/.gitkeep
 
 # Logs
 logs
