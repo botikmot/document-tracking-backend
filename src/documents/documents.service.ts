@@ -494,6 +494,21 @@ export class DocumentsService {
       );
     }
 
+    await this.prisma.documentRoute.updateMany({
+      where: {
+        documentId,
+        toOfficeId: {
+          in: currentUser.officeIds,
+        },
+        status: 'RECEIVED',
+        completedAt: null,
+      },
+      data: {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+      },
+    });
+
     /*
      |--------------------------------------------------------------------------
      | Create Route
@@ -1743,7 +1758,7 @@ export class DocumentsService {
       },
     });
 
-    const completedDocuments = await this.prisma.document.count({
+    /* const completedDocuments = await this.prisma.document.count({
       where: {
         currentOfficeId: {
           in: currentUser.officeIds,
@@ -1753,12 +1768,35 @@ export class DocumentsService {
           name: 'COMPLETED',
         },
       },
+    }); */
+
+    const processedDocuments = await this.prisma.documentRoute.count({
+      where: {
+        toOfficeId: {
+          in: currentUser.officeIds,
+        },
+
+        status: 'COMPLETED',
+      },
+    });
+
+    const totalProcessedDocuments = await this.prisma.documentRoute.count({
+      where: {
+        toOfficeId: {
+          in: currentUser.officeIds,
+        },
+      },
     });
 
     const processingEfficiency =
+      totalProcessedDocuments === 0
+        ? 0
+        : Math.round((processedDocuments / totalProcessedDocuments) * 100);
+
+    /* const processingEfficiency =
       totalDocuments === 0
         ? 0
-        : Math.round((completedDocuments / totalDocuments) * 100);
+        : Math.round((completedDocuments / totalDocuments) * 100); */
 
     const approvedDocuments = await this.prisma.document.count({
       where: {

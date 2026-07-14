@@ -40,6 +40,7 @@ async function main() {
   const documentTypes = [
     'Memorandum',
     'Purchase Request',
+    'Special Order',
     'Contract',
     'Payroll',
     'Letter',
