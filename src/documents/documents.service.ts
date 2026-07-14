@@ -1758,29 +1758,30 @@ export class DocumentsService {
       },
     });
 
-    /* const completedDocuments = await this.prisma.document.count({
-      where: {
-        currentOfficeId: {
-          in: currentUser.officeIds,
-        },
-
-        currentStatus: {
-          name: 'COMPLETED',
-        },
-      },
-    }); */
-
-    const processedDocuments = await this.prisma.documentRoute.count({
+    const completedRoutes = await this.prisma.documentRoute.findMany({
       where: {
         toOfficeId: {
           in: currentUser.officeIds,
         },
 
         status: 'COMPLETED',
+
+        receivedAt: {
+          not: null,
+        },
+
+        completedAt: {
+          not: null,
+        },
+      },
+
+      select: {
+        receivedAt: true,
+        completedAt: true,
       },
     });
 
-    const totalProcessedDocuments = await this.prisma.documentRoute.count({
+    const totalReceivedRoutes = await this.prisma.documentRoute.count({
       where: {
         toOfficeId: {
           in: currentUser.officeIds,
@@ -1788,15 +1789,41 @@ export class DocumentsService {
       },
     });
 
-    const processingEfficiency =
-      totalProcessedDocuments === 0
-        ? 0
-        : Math.round((processedDocuments / totalProcessedDocuments) * 100);
+    const completedCount = completedRoutes.length;
 
-    /* const processingEfficiency =
-      totalDocuments === 0
+    const completionRate =
+      totalReceivedRoutes === 0
         ? 0
-        : Math.round((completedDocuments / totalDocuments) * 100); */
+        : (completedCount / totalReceivedRoutes) * 100;
+
+    const processingTimes = completedRoutes.map((route) => {
+      const received = route.receivedAt!.getTime();
+      const completed = route.completedAt!.getTime();
+
+      return completed - received;
+    });
+
+    const averageProcessingTime =
+      processingTimes.length === 0
+        ? 0
+        : processingTimes.reduce((sum, time) => sum + time, 0) /
+          processingTimes.length;
+    const averageProcessingDays = averageProcessingTime / (1000 * 60 * 60 * 24);
+
+    const targetProcessingDays = 3;
+
+    let timeEfficiency = 0;
+
+    if (averageProcessingDays > 0) {
+      timeEfficiency = (targetProcessingDays / averageProcessingDays) * 100;
+    }
+
+    // Maximum should only be 100%
+    timeEfficiency = Math.min(timeEfficiency, 100);
+
+    const processingEfficiency = Math.round(
+      completionRate * 0.7 + timeEfficiency * 0.3,
+    );
 
     const approvedDocuments = await this.prisma.document.count({
       where: {
