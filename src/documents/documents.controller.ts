@@ -217,10 +217,14 @@ export class DocumentsController {
 
   @Get('track/:trackingNumber')
   trackDocument(
+    @Req() req: AuthenticatedRequest,
     @Param('trackingNumber')
     trackingNumber: string,
   ) {
-    return this.documentsService.trackDocument(trackingNumber);
+    return this.documentsService.getDocumentByTrackingNumber(
+      req.user,
+      trackingNumber,
+    );
   }
 
   /*

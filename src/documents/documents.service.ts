@@ -16,6 +16,45 @@ import { DecisionDocumentDto } from './dto/decision-document.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { Prisma } from '@prisma/client';
 
+type TrackingDocument = Prisma.DocumentGetPayload<{
+  include: {
+    documentType: true;
+    currentStatus: true;
+    currentOffice: {
+      include: {
+        organizationUnit: true;
+      };
+    };
+    senderOffice: true;
+    routes: {
+      include: {
+        fromOffice: {
+          include: {
+            organizationUnit: true;
+          };
+        };
+        toOffice: {
+          include: {
+            organizationUnit: true;
+          };
+        };
+        sentBy: {
+          select: {
+            firstName: true;
+            lastName: true;
+          };
+        };
+        receivedBy: {
+          select: {
+            firstName: true;
+            lastName: true;
+          };
+        };
+      };
+    };
+  };
+}>;
+
 @Injectable()
 export class DocumentsService {
   constructor(
@@ -42,6 +81,52 @@ export class DocumentsService {
     }
 
     return where;
+  }
+
+  private mapTrackingResponse(document: TrackingDocument) {
+    return {
+      trackingNumber: document.trackingNumber,
+      title: document.title,
+      description: document.description,
+      referenceNumber: document.referenceNumber,
+      priority: document.priority,
+      classification: document.classification,
+      createdAt: document.createdAt,
+      deadline: document.deadline,
+      documentType: document.documentType,
+      currentStatus: document.currentStatus,
+      currentOffice: document.currentOffice,
+      routes: document.routes.map((route) => ({
+        id: route.id,
+        fromOffice: route.fromOffice,
+        toOffice: route.toOffice,
+        status: route.status,
+        remarks: route.remarks,
+        sentAt: route.sentAt,
+        receivedAt: route.receivedAt,
+        completedAt: route.completedAt,
+        sentBy: route.sentBy,
+        receivedBy: route.receivedBy,
+      })),
+    };
+  }
+
+  private async getRecordsOrganizationUnitIds(
+    officeIds: string[],
+  ): Promise<string[]> {
+    const offices = await this.prisma.office.findMany({
+      where: {
+        id: {
+          in: officeIds,
+        },
+        category: 'RECORDS',
+      },
+      select: {
+        organizationUnitId: true,
+      },
+    });
+
+    return offices.map((office) => office.organizationUnitId);
   }
 
   /*
@@ -2053,35 +2138,79 @@ export class DocumentsService {
     };
   }
 
-  async searchDocuments(user: any, q: string) {
-    if (!q || !q.trim()) {
+  async searchDocuments(user: AuthenticatedUser, q: string) {
+    if (!q?.trim()) {
       return [];
     }
 
     const query = q.trim();
 
-    const documents = await this.prisma.document.findMany({
-      where: {
-        NOT: {
-          confidentialityLevel: 'CONFIDENTIAL',
+    // Organization Units where the user belongs to a RECORDS office
+    const recordsOrganizationUnitIds = await this.getRecordsOrganizationUnitIds(
+      user.officeIds,
+    );
+
+    const where: Prisma.DocumentWhereInput = {
+      AND: [
+        {
+          OR: [
+            {
+              trackingNumber: {
+                contains: query,
+                mode: 'insensitive',
+              },
+            },
+            {
+              title: {
+                contains: query,
+                mode: 'insensitive',
+              },
+            },
+          ],
         },
-        OR: [
-          {
-            trackingNumber: {
-              contains: query,
-              mode: 'insensitive',
+
+        {
+          OR: [
+            /**
+             * Non-confidential documents
+             */
+            {
+              confidentialityLevel: null,
             },
-          },
-          {
-            title: {
-              contains: query,
-              mode: 'insensitive',
+            {
+              confidentialityLevel: {
+                not: 'CONFIDENTIAL',
+              },
             },
-          },
-        ],
-        // OPTIONAL: if you want to restrict by office/user access
-        // currentOfficeId: user.officeId,
-      },
+
+            /**
+             * Creator can always search their own confidential documents
+             */
+            {
+              confidentialityLevel: 'CONFIDENTIAL',
+              createdById: user.userId,
+            },
+
+            /**
+             * RECORDS office within the SAME Organization Unit
+             */
+            {
+              confidentialityLevel: 'CONFIDENTIAL',
+
+              currentOffice: {
+                organizationUnitId: {
+                  in: recordsOrganizationUnitIds,
+                },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    return this.prisma.document.findMany({
+      where,
+
       select: {
         id: true,
         trackingNumber: true,
@@ -2089,12 +2218,98 @@ export class DocumentsService {
         currentStatusId: true,
         createdAt: true,
       },
+
       take: 5,
+
       orderBy: {
         createdAt: 'desc',
       },
     });
+  }
 
-    return documents;
+  async getDocumentByTrackingNumber(
+    user: AuthenticatedUser,
+    trackingNumber: string,
+  ) {
+    const document = await this.prisma.document.findUnique({
+      where: {
+        trackingNumber,
+      },
+
+      include: {
+        documentType: true,
+
+        currentStatus: true,
+
+        currentOffice: {
+          include: {
+            organizationUnit: true,
+          },
+        },
+
+        senderOffice: true,
+
+        routes: {
+          include: {
+            fromOffice: {
+              include: {
+                organizationUnit: true,
+              },
+            },
+
+            toOffice: {
+              include: {
+                organizationUnit: true,
+              },
+            },
+
+            sentBy: {
+              select: {
+                firstName: true,
+                lastName: true,
+              },
+            },
+
+            receivedBy: {
+              select: {
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+
+          orderBy: {
+            sentAt: 'asc',
+          },
+        },
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Tracking number not found');
+    }
+
+    // ------------------------------
+    // Confidential Access
+    // ------------------------------
+
+    if (document.confidentialityLevel === 'CONFIDENTIAL') {
+      const recordsOrganizationUnitIds =
+        await this.getRecordsOrganizationUnitIds(user.officeIds);
+
+      const isCreator = document.createdById === user.userId;
+
+      const isRecords = recordsOrganizationUnitIds.includes(
+        document.currentOffice.organizationUnitId,
+      );
+
+      if (!isCreator && !isRecords) {
+        throw new ForbiddenException(
+          'You are not allowed to access this confidential document.',
+        );
+      }
+    }
+
+    return this.mapTrackingResponse(document);
   }
 }
