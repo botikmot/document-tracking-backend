@@ -1523,7 +1523,7 @@ export class DocumentsService {
       },
     });
 
-    if (!document) {
+    if (!document || document.confidentialityLevel === 'CONFIDENTIAL') {
       throw new NotFoundException('Tracking number not found');
     }
 
@@ -2062,6 +2062,9 @@ export class DocumentsService {
 
     const documents = await this.prisma.document.findMany({
       where: {
+        NOT: {
+          confidentialityLevel: 'CONFIDENTIAL',
+        },
         OR: [
           {
             trackingNumber: {

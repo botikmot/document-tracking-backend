@@ -190,66 +190,6 @@ export class ReportsService {
 
     const totalDocumentsList = totalDocumentsData.map(mapDocument);
 
-    /* const [
-      incomingDocuments,
-      outgoingDocuments,
-      pendingDocuments,
-      completedDocuments,
-      overdueDocuments,
-      totalDocuments,
-    ] = await Promise.all([
-      this.prisma.documentRoute.count({
-        where: incomingWhere,
-      }),
-
-      this.prisma.documentRoute.count({
-        where: outgoingWhere,
-      }),
-
-      this.prisma.document.count({
-        where: {
-          ...documentWhere,
-
-          currentStatus: {
-            name: {
-              in: ['PENDING', 'FOR_REVIEW', 'FOR_APPROVAL', 'ON_PROCESS'],
-            },
-          },
-        },
-      }),
-
-      this.prisma.document.count({
-        where: {
-          ...documentWhere,
-
-          currentStatus: {
-            name: 'COMPLETED',
-          },
-        },
-      }),
-
-      this.prisma.document.count({
-        where: {
-          ...documentWhere,
-
-          deadline: {
-            not: null,
-            lt: new Date(),
-          },
-
-          currentStatus: {
-            name: {
-              not: 'COMPLETED',
-            },
-          },
-        },
-      }),
-
-      this.prisma.document.count({
-        where: documentWhere,
-      }),
-    ]); */
-
     /*
     |--------------------------------------------------------------------------
     | By Status
