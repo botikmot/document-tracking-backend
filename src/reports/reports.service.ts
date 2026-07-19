@@ -43,6 +43,11 @@ export class ReportsService {
 
     const documentWhere: Prisma.DocumentWhereInput = {};
 
+    documentWhere.createdAt = {
+      gte: startDate,
+      lte: endDate,
+    };
+
     if (filter.officeIds?.length) {
       documentWhere.currentOfficeId = {
         in: filter.officeIds,
@@ -370,6 +375,74 @@ export class ReportsService {
         ? 0
         : Number(((completedDocuments / totalDocuments) * 100).toFixed(1));
 
+    const completedRoutes = await this.prisma.documentRoute.findMany({
+      where: {
+        toOfficeId: {
+          in: filter.officeIds,
+        },
+
+        status: 'COMPLETED',
+
+        receivedAt: {
+          not: null,
+        },
+
+        completedAt: {
+          not: null,
+        },
+
+        document: documentWhere,
+      },
+
+      select: {
+        receivedAt: true,
+        completedAt: true,
+      },
+    });
+
+    const totalReceivedRoutes = await this.prisma.documentRoute.count({
+      where: {
+        toOfficeId: {
+          in: filter.officeIds,
+        },
+
+        document: documentWhere,
+      },
+    });
+
+    const completedCount = completedRoutes.length;
+
+    const efficiencyRate =
+      totalReceivedRoutes === 0
+        ? 0
+        : (completedCount / totalReceivedRoutes) * 100;
+
+    const processingTimes = completedRoutes.map((route) => {
+      return route.completedAt!.getTime() - route.receivedAt!.getTime();
+    });
+
+    const averageProcessingTime =
+      processingTimes.length === 0
+        ? 0
+        : processingTimes.reduce((sum, t) => sum + t, 0) /
+          processingTimes.length;
+
+    const averageProcessingDays = averageProcessingTime / (1000 * 60 * 60 * 24);
+
+    const targetProcessingDays = 3;
+
+    let timeEfficiency = 0;
+
+    if (averageProcessingDays > 0) {
+      timeEfficiency = (targetProcessingDays / averageProcessingDays) * 100;
+    }
+
+    timeEfficiency = Math.min(timeEfficiency, 100);
+
+    const processingEfficiency = Math.round(
+      efficiencyRate * 0.7 + timeEfficiency * 0.3,
+    );
+
     return {
       reportPeriod: {
         type: filter.type,
@@ -408,6 +481,8 @@ export class ReportsService {
         },
 
         completionRate,
+        processingEfficiency,
+        efficiencyRate,
         averageProcessingHours,
       },
       statusBreakdown,
