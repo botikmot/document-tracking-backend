@@ -473,7 +473,7 @@ export class DocumentsService {
       where: {
         id,
       },
-      include: { attachments: true },
+      include: { attachments: true, currentOffice: true },
     });
 
     if (!document) {
@@ -481,12 +481,37 @@ export class DocumentsService {
     }
 
     /*
-     |--------------------------------------------------------------------------
-     | Only creator can update for now
-     |--------------------------------------------------------------------------
-     */
+|--------------------------------------------------------------------------
+| Update Permission
+|--------------------------------------------------------------------------
+|
+| Allowed:
+| 1. Original creator
+| 2. User belonging to ORD, while document is currently in ORD
+|
+*/
 
-    if (document.createdById !== currentUser.userId) {
+    const isCreator = document.createdById === currentUser.userId;
+
+    const isDocumentInOrd = document.currentOffice?.officeCode === 'ORD';
+
+    const ordOffice = await this.prisma.office.findFirst({
+      where: {
+        id: {
+          in: currentUser.officeIds,
+        },
+        officeCode: 'ORD',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const isOrdUser = Boolean(ordOffice);
+
+    const canUpdate = isCreator || (isOrdUser && isDocumentInOrd);
+
+    if (!canUpdate) {
       throw new ForbiddenException('You cannot update this document');
     }
 
