@@ -192,26 +192,128 @@ export class UsersService {
    |--------------------------------------------------------------------------
    */
 
-    if (currentUser.roles.includes('SUPER_ADMIN')) {
-      const updateData: Prisma.UserUpdateInput = {
-        employeeId: dto.employeeId,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        email: dto.email,
-        username: dto.username,
-      };
+    /*
+|--------------------------------------------------------------------------
+| SUPER_ADMIN can update anyone
+|--------------------------------------------------------------------------
+*/
 
-      // hash password if provided
-      if (dto.password) {
-        updateData.passwordHash = await bcrypt.hash(dto.password, 10);
+    if (currentUser.roles.includes('SUPER_ADMIN')) {
+      /*
+  |--------------------------------------------------------------------------
+  | Validate Roles
+  |--------------------------------------------------------------------------
+  */
+
+      if (dto.roleIds !== undefined) {
+        const roles = await this.prisma.role.findMany({
+          where: {
+            id: {
+              in: dto.roleIds,
+            },
+          },
+        });
+
+        if (roles.length !== dto.roleIds.length) {
+          throw new BadRequestException('One or more roles are invalid');
+        }
       }
 
-      return this.prisma.user.update({
-        where: {
-          id,
-        },
+      /*
+  |--------------------------------------------------------------------------
+  | Update User + Roles Transaction
+  |--------------------------------------------------------------------------
+  */
 
-        data: updateData,
+      return this.prisma.$transaction(async (tx) => {
+        const updateData: Prisma.UserUpdateInput = {
+          employeeId: dto.employeeId,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          email: dto.email,
+          username: dto.username,
+        };
+
+        /*
+    |--------------------------------------------------------------------------
+    | Password
+    |--------------------------------------------------------------------------
+    */
+
+        if (dto.password) {
+          updateData.passwordHash = await bcrypt.hash(dto.password, 10);
+        }
+
+        /*
+    |--------------------------------------------------------------------------
+    | Update Basic User Information
+    |--------------------------------------------------------------------------
+    */
+
+        await tx.user.update({
+          where: {
+            id,
+          },
+
+          data: updateData,
+        });
+
+        /*
+    |--------------------------------------------------------------------------
+    | Update Roles
+    |--------------------------------------------------------------------------
+    */
+
+        if (dto.roleIds !== undefined) {
+          /*
+      | Remove existing roles
+      */
+
+          await tx.userRole.deleteMany({
+            where: {
+              userId: id,
+            },
+          });
+
+          /*
+      | Assign new roles
+      */
+
+          if (dto.roleIds.length > 0) {
+            await tx.userRole.createMany({
+              data: dto.roleIds.map((roleId) => ({
+                userId: id,
+                roleId,
+              })),
+            });
+          }
+        }
+
+        /*
+    |--------------------------------------------------------------------------
+    | Return Updated User
+    |--------------------------------------------------------------------------
+    */
+
+        return tx.user.findUnique({
+          where: {
+            id,
+          },
+
+          include: {
+            roles: {
+              include: {
+                role: true,
+              },
+            },
+
+            offices: {
+              include: {
+                office: true,
+              },
+            },
+          },
+        });
       });
     }
 
