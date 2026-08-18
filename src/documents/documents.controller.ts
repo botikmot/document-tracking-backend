@@ -25,12 +25,40 @@ import { UpdateDocumentDto } from './dto/update-document.dto';
 import { RouteDocumentDto } from './dto/route-document.dto';
 import { ReturnDocumentDto } from './dto/return-document.dto';
 import { DecisionDocumentDto } from './dto/decision-document.dto';
+import { CreateDocumentActionDto } from './dto/create-document-action.dto';
 
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
+import { unlink } from 'fs/promises';
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
+
+import { existsSync, mkdirSync } from 'fs';
+import { extname } from 'path';
+import { randomUUID } from 'crypto';
+
+const documentActionStorage = diskStorage({
+  destination: (req, file, callback) => {
+    const uploadPath = './uploads/document-actions';
+
+    if (!existsSync(uploadPath)) {
+      mkdirSync(uploadPath, {
+        recursive: true,
+      });
+    }
+
+    callback(null, uploadPath);
+  },
+
+  filename: (req, file, callback) => {
+    const extension = extname(file.originalname).toLowerCase();
+
+    const filename = `${randomUUID()}${extension}`;
+
+    callback(null, filename);
+  },
+});
 
 @Controller('documents')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -485,6 +513,83 @@ export class DocumentsController {
     req: AuthenticatedRequest,
   ) {
     return this.documentsService.receiveDocument(id, req.user);
+  }
+
+  /*
+|--------------------------------------------------------------------------
+| ADD DOCUMENT ACTION
+|--------------------------------------------------------------------------
+*/
+
+  @Post(':id/actions')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: documentActionStorage,
+
+      limits: {
+        fileSize: 10 * 1024 * 1024,
+      },
+
+      fileFilter: (req, file, callback) => {
+        const allowedMimeTypes = [
+          'application/pdf',
+
+          'application/msword',
+
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+
+          'application/vnd.ms-excel',
+
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+
+          'image/jpeg',
+          'image/png',
+        ];
+
+        if (!allowedMimeTypes.includes(file.mimetype)) {
+          return callback(
+            new BadRequestException('Unsupported file type'),
+            false,
+          );
+        }
+
+        callback(null, true);
+      },
+    }),
+  )
+  async addAction(
+    @Param('id')
+    documentId: string,
+
+    @Body()
+    dto: CreateDocumentActionDto,
+
+    @UploadedFile()
+    file: Express.Multer.File | undefined,
+
+    @Req()
+    req: AuthenticatedRequest,
+  ) {
+    try {
+      return await this.documentsService.addAction(
+        documentId,
+        dto,
+        file,
+        req.user,
+      );
+    } catch (error) {
+      /*
+    |--------------------------------------------------------------------------
+    | Delete File If DB / Permission Validation Fails
+    |--------------------------------------------------------------------------
+    */
+
+      if (file?.path) {
+        await unlink(file.path).catch(() => undefined);
+      }
+
+      throw error;
+    }
   }
 
   /*

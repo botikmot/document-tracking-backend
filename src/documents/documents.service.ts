@@ -15,6 +15,7 @@ import { RouteDocumentDto } from './dto/route-document.dto';
 import { ReturnDocumentDto } from './dto/return-document.dto';
 import { DecisionDocumentDto } from './dto/decision-document.dto';
 import { PublicUpdateDocumentStatusDto } from './dto/public-update-document-status.dto';
+import { CreateDocumentActionDto } from './dto/create-document-action.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { Prisma } from '@prisma/client';
 
@@ -1135,6 +1136,30 @@ export class DocumentsService {
 
             orderBy: {
               sentAt: 'asc',
+            },
+          },
+          actions: {
+            orderBy: {
+              createdAt: 'desc',
+            },
+
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  username: true,
+                },
+              },
+
+              office: {
+                select: {
+                  id: true,
+                  officeCode: true,
+                  officeName: true,
+                },
+              },
             },
           },
         },
@@ -3397,5 +3422,136 @@ export class DocumentsService {
         remarks: dto.remarks ?? null,
       },
     };
+  }
+
+  /*
+|--------------------------------------------------------------------------
+| ADD DOCUMENT ACTION
+|--------------------------------------------------------------------------
+*/
+
+  async addAction(
+    documentId: string,
+    dto: CreateDocumentActionDto,
+    file: Express.Multer.File | undefined,
+    currentUser: AuthenticatedUser,
+  ) {
+    /*
+  |--------------------------------------------------------------------------
+  | Find Document
+  |--------------------------------------------------------------------------
+  */
+
+    const document = await this.prisma.document.findUnique({
+      where: {
+        id: documentId,
+      },
+
+      include: {
+        currentStatus: true,
+        currentOffice: true,
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Document not found');
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Check Current Office Access
+  |--------------------------------------------------------------------------
+  */
+
+    const isSuperAdmin = currentUser.roles.includes('SUPER_ADMIN');
+
+    const belongsToCurrentOffice = currentUser.officeIds.includes(
+      document.currentOfficeId,
+    );
+
+    if (!isSuperAdmin && !belongsToCurrentOffice) {
+      throw new ForbiddenException('You cannot add an action to this document');
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Document Must Be Received First
+  |--------------------------------------------------------------------------
+  */
+
+    if (document.currentStatus?.name === 'IN_TRANSIT') {
+      throw new BadRequestException(
+        'Document must be received before an action can be added',
+      );
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Completed Documents Cannot Be Modified
+  |--------------------------------------------------------------------------
+  */
+
+    if (document.currentStatus?.name === 'COMPLETED') {
+      throw new BadRequestException(
+        'Cannot add an action to a completed document',
+      );
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Validate Content
+  |--------------------------------------------------------------------------
+  */
+
+    const comment = dto.comment?.trim() || null;
+
+    if (!comment && !file) {
+      throw new BadRequestException('Please provide a comment or attachment');
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Create Action
+  |--------------------------------------------------------------------------
+  */
+
+    const action = await this.prisma.documentAction.create({
+      data: {
+        documentId,
+
+        userId: currentUser.userId,
+
+        officeId: document.currentOfficeId,
+
+        comment,
+
+        fileName: file?.originalname ?? null,
+
+        filePath: file ? `/uploads/document-actions/${file.filename}` : null,
+
+        fileType: file?.mimetype ?? null,
+      },
+
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+          },
+        },
+
+        office: {
+          select: {
+            id: true,
+            officeCode: true,
+            officeName: true,
+          },
+        },
+      },
+    });
+
+    return action;
   }
 }
