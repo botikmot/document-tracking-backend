@@ -2,6 +2,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,6 +14,7 @@ import { UpdateDocumentDto } from './dto/update-document.dto';
 import { RouteDocumentDto } from './dto/route-document.dto';
 import { ReturnDocumentDto } from './dto/return-document.dto';
 import { DecisionDocumentDto } from './dto/decision-document.dto';
+import { PublicUpdateDocumentStatusDto } from './dto/public-update-document-status.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { Prisma } from '@prisma/client';
 
@@ -3206,5 +3208,194 @@ export class DocumentsService {
     }
 
     return this.mapTrackingResponse(document);
+  }
+
+  async publicUpdateDocumentStatus(dto: PublicUpdateDocumentStatusDto) {
+    const allowedStatuses = [
+      'PENDING',
+      'FOR_REVIEW',
+      'FOR_APPROVAL',
+      'ON_PROCESS',
+      'FOR_RELEASE',
+      'APPROVED',
+      'REJECTED',
+      'COMPLETED',
+    ];
+
+    const requestedStatus = dto.status.trim().toUpperCase();
+
+    /*
+  |--------------------------------------------------------------------------
+  | RESTRICT STATUS VALUES
+  |--------------------------------------------------------------------------
+  */
+
+    if (!allowedStatuses.includes(requestedStatus)) {
+      throw new BadRequestException(
+        `Status "${requestedStatus}" is not allowed.`,
+      );
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | FIND DOCUMENT
+  |--------------------------------------------------------------------------
+  */
+
+    const document = await this.prisma.document.findUnique({
+      where: {
+        trackingNumber: dto.trackingNumber,
+      },
+
+      include: {
+        currentStatus: true,
+
+        currentOffice: true,
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException(
+        `Document with tracking number ${dto.trackingNumber} was not found.`,
+      );
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | FIND STATUS
+  |--------------------------------------------------------------------------
+  */
+
+    const status = await this.prisma.documentStatus.findUnique({
+      where: {
+        name: requestedStatus,
+      },
+    });
+
+    if (!status) {
+      throw new NotFoundException(
+        `Document status "${requestedStatus}" does not exist.`,
+      );
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | NO CHANGE
+  |--------------------------------------------------------------------------
+  */
+
+    if (document.currentStatusId === status.id) {
+      return {
+        success: true,
+
+        changed: false,
+
+        message: 'Document already has the requested status.',
+
+        document: {
+          id: document.id,
+
+          trackingNumber: document.trackingNumber,
+
+          status: document.currentStatus.name,
+        },
+      };
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | UPDATE
+  |--------------------------------------------------------------------------
+  */
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+
+      /*
+       * If external system marks the
+       * document COMPLETED, also complete
+       * the currently active incoming route.
+       */
+      if (requestedStatus === 'COMPLETED') {
+        const activeRoute = await tx.documentRoute.findFirst({
+          where: {
+            documentId: document.id,
+
+            toOfficeId: document.currentOfficeId,
+
+            status: 'RECEIVED',
+
+            completedAt: null,
+          },
+
+          orderBy: {
+            sentAt: 'desc',
+          },
+
+          select: {
+            id: true,
+          },
+        });
+
+        if (activeRoute) {
+          await tx.documentRoute.update({
+            where: {
+              id: activeRoute.id,
+            },
+
+            data: {
+              status: 'COMPLETED',
+
+              completedAt: now,
+            },
+          });
+        }
+      }
+
+      /*
+       * Update global document status.
+       */
+      const updatedDocument = await tx.document.update({
+        where: {
+          id: document.id,
+        },
+
+        data: {
+          currentStatusId: status.id,
+        },
+
+        include: {
+          currentStatus: true,
+
+          currentOffice: true,
+
+          documentType: true,
+        },
+      });
+
+      return updatedDocument;
+    });
+
+    return {
+      success: true,
+
+      changed: true,
+
+      message: 'Document status updated successfully.',
+
+      document: {
+        id: result.id,
+
+        trackingNumber: result.trackingNumber,
+
+        title: result.title,
+
+        status: result.currentStatus.name,
+
+        currentOffice: result.currentOffice?.officeName ?? null,
+
+        remarks: dto.remarks ?? null,
+      },
+    };
   }
 }
