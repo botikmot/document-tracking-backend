@@ -271,6 +271,21 @@ export class DocumentsController {
     return this.documentsService.searchDocuments(req.user, q);
   }
 
+  @Get('records-monitoring')
+  getRecordsMonitoring(
+    @Req()
+    req: AuthenticatedRequest,
+    @Query('search') search?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
+  ) {
+    return this.documentsService.getRecordsMonitoring(req.user, {
+      search,
+      page: Number(page),
+      limit: Number(limit),
+    });
+  }
+
   /*
    |--------------------------------------------------------------------------
    | FIND ONE DOCUMENT

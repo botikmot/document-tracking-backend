@@ -1986,10 +1986,10 @@ export class DocumentsService {
     currentUser: AuthenticatedUser,
   ) {
     /*
-   |--------------------------------------------------------------------------
-   | FIND STATUS
-   |--------------------------------------------------------------------------
-   */
+  |--------------------------------------------------------------------------
+  | FIND STATUS
+  |--------------------------------------------------------------------------
+  */
 
     const status = await this.prisma.documentStatus.findUnique({
       where: {
@@ -2002,41 +2002,164 @@ export class DocumentsService {
     }
 
     /*
-   |--------------------------------------------------------------------------
-   | UPDATE DOCUMENT
-   |--------------------------------------------------------------------------
-   */
+  |--------------------------------------------------------------------------
+  | FIND DOCUMENT
+  |--------------------------------------------------------------------------
+  */
 
-    const updatedDocument = await this.prisma.document.update({
+    const document = await this.prisma.document.findUnique({
       where: {
         id: documentId,
       },
 
-      data: {
-        currentStatusId: status.id,
-      },
-
       include: {
-        currentStatus: true,
         currentOffice: true,
-        documentType: true,
       },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Document not found');
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | VERIFY OFFICE ACCESS
+  |--------------------------------------------------------------------------
+  |
+  | The user can only update the document status while the document
+  | is currently assigned to one of the user's offices.
+  |
+  */
+
+    const belongsToCurrentOffice = currentUser.officeIds.includes(
+      document.currentOfficeId,
+    );
+
+    if (!belongsToCurrentOffice) {
+      throw new ForbiddenException(
+        'You cannot update the status of a document outside your office',
+      );
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | TIMESTAMP
+  |--------------------------------------------------------------------------
+  */
+
+    const now = new Date();
+
+    /*
+  |--------------------------------------------------------------------------
+  | TRANSACTION
+  |--------------------------------------------------------------------------
+  */
+
+    const updatedDocument = await this.prisma.$transaction(async (tx) => {
+      /*
+        |--------------------------------------------------------------------------
+        | COMPLETE CURRENT OFFICE ROUTE
+        |--------------------------------------------------------------------------
+        |
+        | Example:
+        |
+        | Records -> ORD
+        |
+        | Once ORD receives the document:
+        |
+        | route.status = RECEIVED
+        |
+        | If ORD changes the document status to COMPLETED without routing
+        | it onward, this incoming route must also become COMPLETED.
+        |
+        */
+
+      if (status.name === 'COMPLETED') {
+        const activeIncomingRoute = await tx.documentRoute.findFirst({
+          where: {
+            documentId,
+
+            toOfficeId: document.currentOfficeId,
+
+            status: 'RECEIVED',
+
+            completedAt: null,
+          },
+
+          orderBy: {
+            sentAt: 'desc',
+          },
+
+          select: {
+            id: true,
+          },
+        });
+
+        if (activeIncomingRoute) {
+          await tx.documentRoute.update({
+            where: {
+              id: activeIncomingRoute.id,
+            },
+
+            data: {
+              status: 'COMPLETED',
+
+              completedAt: now,
+            },
+          });
+        }
+      }
+
+      /*
+        |--------------------------------------------------------------------------
+        | UPDATE GLOBAL DOCUMENT STATUS
+        |--------------------------------------------------------------------------
+        */
+
+      const updated = await tx.document.update({
+        where: {
+          id: documentId,
+        },
+
+        data: {
+          currentStatusId: status.id,
+        },
+
+        include: {
+          currentStatus: true,
+
+          currentOffice: true,
+
+          documentType: true,
+        },
+      });
+
+      /*
+        |--------------------------------------------------------------------------
+        | AUDIT LOG
+        |--------------------------------------------------------------------------
+        */
+
+      await tx.documentLog.create({
+        data: {
+          documentId,
+
+          userId: currentUser.userId,
+
+          action: 'STATUS_UPDATED',
+
+          description: `Document marked as ${status.name}`,
+        },
+      });
+
+      return updated;
     });
 
     /*
-   |--------------------------------------------------------------------------
-   | AUDIT LOG
-   |--------------------------------------------------------------------------
-   */
-
-    await this.prisma.documentLog.create({
-      data: {
-        documentId,
-        userId: currentUser.userId,
-        action: 'STATUS_UPDATED',
-        description: `Document marked as ${status.name}`,
-      },
-    });
+  |--------------------------------------------------------------------------
+  | RETURN
+  |--------------------------------------------------------------------------
+  */
 
     return updatedDocument;
   }
@@ -2250,6 +2373,650 @@ export class DocumentsService {
         createdAt: 'desc',
       },
     });
+  }
+
+  async getRecordsMonitoring(
+    currentUser: AuthenticatedUser,
+    query: {
+      search?: string;
+      page?: number;
+      limit?: number;
+    },
+  ) {
+    /*
+  |--------------------------------------------------------------------------
+  | Pagination
+  |--------------------------------------------------------------------------
+  */
+
+    const page = Math.max(Number(query.page ?? 1), 1);
+
+    const limit = Math.min(Math.max(Number(query.limit ?? 10), 1), 100);
+
+    const skip = (page - 1) * limit;
+
+    const search = query.search?.trim() ?? '';
+
+    const now = new Date();
+
+    /*
+  |--------------------------------------------------------------------------
+  | Verify ORD Membership
+  |--------------------------------------------------------------------------
+  |
+  | Records Monitoring is only available to users who belong to ORD.
+  |
+  */
+
+    const ordMembership = await this.prisma.officeUser.findFirst({
+      where: {
+        userId: currentUser.userId,
+
+        office: {
+          officeCode: 'ORD',
+        },
+      },
+
+      select: {
+        officeId: true,
+
+        office: {
+          select: {
+            id: true,
+            officeCode: true,
+            officeName: true,
+            organizationUnitId: true,
+          },
+        },
+      },
+    });
+
+    if (!ordMembership) {
+      throw new ForbiddenException(
+        'Only the Office of the Regional Director can access Records Monitoring',
+      );
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Resolve Regional Records Office
+  |--------------------------------------------------------------------------
+  |
+  | We find the Records Office that belongs to the same organization unit
+  | as ORD. This avoids accidentally monitoring PENRO/CENRO Records offices.
+  |
+  */
+
+    const recordsOffice = await this.prisma.office.findFirst({
+      where: {
+        category: 'RECORDS',
+        organizationUnitId: ordMembership.office.organizationUnitId,
+      },
+
+      select: {
+        id: true,
+        officeCode: true,
+        officeName: true,
+        organizationUnitId: true,
+      },
+    });
+
+    if (!recordsOffice) {
+      throw new NotFoundException('Regional Records Office not found');
+    }
+
+    const recordsOfficeId = recordsOffice.id;
+
+    /*
+  |--------------------------------------------------------------------------
+  | Records Monitoring Scope
+  |--------------------------------------------------------------------------
+  |
+  | Include a document when:
+  |
+  | 1. It is currently in Records
+  | 2. It has been routed TO Records
+  | 3. It has been routed FROM Records
+  |
+  | This preserves historical Records visibility even after the document
+  | has already moved to ORD, PMD, ICT, or another office.
+  |
+  */
+
+    const recordsScopeWhere: Prisma.DocumentWhereInput = {
+      OR: [
+        {
+          currentOfficeId: recordsOfficeId,
+        },
+
+        {
+          routes: {
+            some: {
+              OR: [
+                {
+                  toOfficeId: recordsOfficeId,
+                },
+
+                {
+                  fromOfficeId: recordsOfficeId,
+                },
+              ],
+            },
+          },
+        },
+      ],
+    };
+
+    /*
+  |--------------------------------------------------------------------------
+  | Search
+  |--------------------------------------------------------------------------
+  */
+
+    const searchWhere: Prisma.DocumentWhereInput | undefined = search
+      ? {
+          OR: [
+            {
+              trackingNumber: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+
+            {
+              title: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+
+            {
+              referenceNumber: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+
+            {
+              senderName: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+
+            {
+              senderOrganization: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+
+            {
+              addressee: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+          ],
+        }
+      : undefined;
+
+    const where: Prisma.DocumentWhereInput = {
+      AND: [recordsScopeWhere, ...(searchWhere ? [searchWhere] : [])],
+    };
+
+    /*
+  |--------------------------------------------------------------------------
+  | Query Documents
+  |--------------------------------------------------------------------------
+  */
+
+    const [documents, total] = await this.prisma.$transaction([
+      this.prisma.document.findMany({
+        where,
+
+        skip,
+        take: limit,
+
+        orderBy: {
+          createdAt: 'desc',
+        },
+
+        include: {
+          documentType: true,
+
+          currentStatus: true,
+
+          currentOffice: true,
+
+          senderOffice: true,
+
+          createdBy: true,
+
+          routes: {
+            orderBy: {
+              sentAt: 'asc',
+            },
+
+            include: {
+              fromOffice: true,
+
+              toOffice: true,
+
+              sentBy: {
+                select: {
+                  id: true,
+                  username: true,
+                },
+              },
+
+              receivedBy: {
+                select: {
+                  id: true,
+                  username: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+
+      this.prisma.document.count({
+        where,
+      }),
+    ]);
+
+    /*
+  |--------------------------------------------------------------------------
+  | Transform Documents
+  |--------------------------------------------------------------------------
+  */
+
+    const data = documents.map((document) => {
+      /*
+      |--------------------------------------------------------------------------
+      | Records-related Routes
+      |--------------------------------------------------------------------------
+      */
+
+      const recordsRoutes = document.routes.filter(
+        (route) =>
+          route.toOfficeId === recordsOfficeId ||
+          route.fromOfficeId === recordsOfficeId,
+      );
+
+      const incomingToRecords = document.routes.filter(
+        (route) => route.toOfficeId === recordsOfficeId,
+      );
+
+      const outgoingFromRecords = document.routes.filter(
+        (route) => route.fromOfficeId === recordsOfficeId,
+      );
+
+      const latestIncoming =
+        incomingToRecords.length > 0
+          ? incomingToRecords[incomingToRecords.length - 1]
+          : null;
+
+      const latestOutgoing =
+        outgoingFromRecords.length > 0
+          ? outgoingFromRecords[outgoingFromRecords.length - 1]
+          : null;
+
+      /*
+      |--------------------------------------------------------------------------
+      | Records Status
+      |--------------------------------------------------------------------------
+      */
+
+      let recordsStatus:
+        | 'AWAITING_RECEIPT'
+        | 'IN_CUSTODY'
+        | 'COMPLETED'
+        | 'RETURNED'
+        | 'UNKNOWN' = 'UNKNOWN';
+
+      /*
+       * Document is currently with Records.
+       */
+      if (document.currentOfficeId === recordsOfficeId) {
+        /*
+         * Routed to Records but Records
+         * has not received it yet.
+         */
+        if (latestIncoming && !latestIncoming.receivedAt) {
+          recordsStatus = 'AWAITING_RECEIPT';
+        } else {
+          /*
+           * Received by Records or
+           * originally created there.
+           */
+          recordsStatus = 'IN_CUSTODY';
+        }
+      } else {
+        /*
+         * Determine the latest Records
+         * routing activity.
+         */
+
+        const latestIncomingTime = latestIncoming
+          ? latestIncoming.sentAt.getTime()
+          : 0;
+
+        const latestOutgoingTime = latestOutgoing
+          ? latestOutgoing.sentAt.getTime()
+          : 0;
+
+        /*
+         * Returned route is the latest
+         * Records activity.
+         */
+        if (
+          latestIncoming &&
+          latestIncoming.status === 'RETURNED' &&
+          latestIncomingTime >= latestOutgoingTime
+        ) {
+          recordsStatus = 'RETURNED';
+        } else if (latestOutgoing) {
+          /*
+           * Records routed the document
+           * onward, therefore Records'
+           * handling is complete.
+           */
+          recordsStatus = 'COMPLETED';
+        } else if (latestIncoming) {
+          /*
+           * Historical incoming route but
+           * document is no longer currently
+           * assigned to Records.
+           */
+          recordsStatus = latestIncoming.completedAt ? 'COMPLETED' : 'UNKNOWN';
+        }
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | Time in Records
+      |--------------------------------------------------------------------------
+      |
+      | Receiving Records:
+      | receivedAt -> completedAt
+      |
+      | Currently held:
+      | receivedAt -> now
+      |
+      | Originating Records document:
+      | document.createdAt -> first outgoing sentAt
+      |
+      | If a document enters Records more than once, custody periods are added.
+      |
+      */
+
+      let timeInRecordsMs = 0;
+
+      let hasRecordsCustodyPeriod = false;
+
+      /*
+       * Check whether the document originated
+       * in Records.
+       *
+       * If the very first route in the entire
+       * document history starts FROM Records,
+       * Records was effectively the origin office.
+       */
+      const firstRoute = document.routes.length > 0 ? document.routes[0] : null;
+
+      const originatedInRecords = firstRoute?.fromOfficeId === recordsOfficeId;
+
+      if (originatedInRecords && firstRoute) {
+        timeInRecordsMs += Math.max(
+          firstRoute.sentAt.getTime() - document.createdAt.getTime(),
+          0,
+        );
+
+        hasRecordsCustodyPeriod = true;
+      }
+
+      /*
+       * Incoming custody periods.
+       */
+      for (const route of incomingToRecords) {
+        if (!route.receivedAt) {
+          continue;
+        }
+
+        const start = route.receivedAt.getTime();
+
+        let end: number;
+
+        if (route.completedAt) {
+          end = route.completedAt.getTime();
+        } else if (document.currentOfficeId === recordsOfficeId) {
+          end = now.getTime();
+        } else {
+          /*
+           * No completedAt and document is
+           * no longer in Records.
+           *
+           * Try to find the next outgoing
+           * route from Records occurring
+           * after this receipt.
+           */
+          const nextOutgoing = outgoingFromRecords.find(
+            (outgoing) => outgoing.sentAt.getTime() >= start,
+          );
+
+          end = nextOutgoing ? nextOutgoing.sentAt.getTime() : start;
+        }
+
+        timeInRecordsMs += Math.max(end - start, 0);
+
+        hasRecordsCustodyPeriod = true;
+      }
+
+      /*
+       * Local Records document that has
+       * never been routed.
+       */
+      if (
+        document.currentOfficeId === recordsOfficeId &&
+        document.routes.length === 0
+      ) {
+        timeInRecordsMs = Math.max(
+          now.getTime() - document.createdAt.getTime(),
+          0,
+        );
+
+        hasRecordsCustodyPeriod = true;
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | Records Received At
+      |--------------------------------------------------------------------------
+      */
+
+      const recordsReceivedAt =
+        latestIncoming?.receivedAt ??
+        (originatedInRecords ? document.createdAt : null);
+
+      /*
+      |--------------------------------------------------------------------------
+      | Records Completed At
+      |--------------------------------------------------------------------------
+      */
+
+      let recordsCompletedAt: Date | null = null;
+
+      if (latestOutgoing && document.currentOfficeId !== recordsOfficeId) {
+        recordsCompletedAt = latestOutgoing.sentAt;
+      } else if (latestIncoming?.completedAt) {
+        recordsCompletedAt = latestIncoming.completedAt;
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | Deadline
+      |--------------------------------------------------------------------------
+      */
+
+      const isOverdue = Boolean(
+        document.deadline &&
+        document.currentOfficeId === recordsOfficeId &&
+        document.deadline.getTime() < now.getTime() &&
+        document.currentStatus?.name !== 'COMPLETED',
+      );
+
+      const allottedTimeMs = document.deadline
+        ? Math.max(
+            document.deadline.getTime() - document.createdAt.getTime(),
+            0,
+          )
+        : null;
+
+      /*
+      |--------------------------------------------------------------------------
+      | Last Records Route
+      |--------------------------------------------------------------------------
+      */
+
+      const lastRecordsRoute =
+        recordsRoutes.length > 0
+          ? recordsRoutes[recordsRoutes.length - 1]
+          : null;
+
+      /*
+      |--------------------------------------------------------------------------
+      | Return
+      |--------------------------------------------------------------------------
+      */
+
+      return {
+        /*
+         * Existing document data.
+         */
+        id: document.id,
+
+        trackingNumber: document.trackingNumber,
+
+        title: document.title,
+
+        description: document.description,
+
+        referenceNumber: document.referenceNumber,
+
+        addressee: document.addressee,
+
+        senderType: document.senderType,
+
+        senderName: document.senderName,
+
+        senderOrganization: document.senderOrganization,
+
+        senderContact: document.senderContact,
+
+        priority: document.priority,
+
+        classification: document.classification,
+
+        confidentialityLevel: document.confidentialityLevel,
+
+        deadline: document.deadline,
+
+        createdAt: document.createdAt,
+
+        createdBy: document.createdBy,
+
+        updatedAt: document.updatedAt,
+
+        documentType: document.documentType,
+
+        currentStatus: document.currentStatus,
+
+        currentOffice: document.currentOffice,
+
+        senderOffice: document.senderOffice,
+
+        /*
+         * Full routing history is useful
+         * for the ORD timeline drawer.
+         *
+         * User passwordHash is NOT exposed
+         * because sentBy/receivedBy use select.
+         */
+        routes: document.routes,
+
+        /*
+         |--------------------------------------------------------------------------
+         | Records Monitoring Metadata
+         |--------------------------------------------------------------------------
+         */
+
+        recordsMonitoring: {
+          recordsOffice: {
+            id: recordsOffice.id,
+
+            officeCode: recordsOffice.officeCode,
+
+            officeName: recordsOffice.officeName,
+          },
+
+          status: recordsStatus,
+
+          currentlyInRecords: document.currentOfficeId === recordsOfficeId,
+
+          isOverdue,
+
+          allottedTimeMs,
+
+          timeInRecordsMs: hasRecordsCustodyPeriod ? timeInRecordsMs : null,
+
+          receivedAt: recordsReceivedAt,
+
+          completedAt: recordsCompletedAt,
+
+          lastRoutedFrom: latestIncoming?.fromOffice?.officeName ?? null,
+
+          lastRoutedTo: latestOutgoing?.toOffice?.officeName ?? null,
+
+          routedFromRecordsAt: latestOutgoing?.sentAt ?? null,
+
+          transactionCount: recordsRoutes.length,
+
+          lastTransactionAt: lastRecordsRoute
+            ? (lastRecordsRoute.completedAt ??
+              lastRecordsRoute.receivedAt ??
+              lastRecordsRoute.sentAt)
+            : document.createdAt,
+        },
+      };
+    });
+
+    /*
+  |--------------------------------------------------------------------------
+  | Return
+  |--------------------------------------------------------------------------
+  */
+
+    return {
+      recordsOffice: {
+        id: recordsOffice.id,
+
+        officeCode: recordsOffice.officeCode,
+
+        officeName: recordsOffice.officeName,
+      },
+
+      data,
+
+      meta: {
+        page,
+        limit,
+        total,
+
+        totalPages: total === 0 ? 0 : Math.ceil(total / limit),
+      },
+    };
   }
 
   async getDocumentByTrackingNumber(
