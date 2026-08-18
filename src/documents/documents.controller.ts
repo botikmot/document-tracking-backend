@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -8,6 +9,9 @@ import {
   Req,
   UseGuards,
   Query,
+  UploadedFile,
+  UseInterceptors,
+  Delete,
 } from '@nestjs/common';
 
 import { DocumentsService } from './documents.service';
@@ -21,6 +25,12 @@ import { UpdateDocumentDto } from './dto/update-document.dto';
 import { RouteDocumentDto } from './dto/route-document.dto';
 import { ReturnDocumentDto } from './dto/return-document.dto';
 import { DecisionDocumentDto } from './dto/decision-document.dto';
+
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+
+import * as path from 'path';
+import * as fs from 'fs/promises';
 
 @Controller('documents')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -160,6 +170,96 @@ export class DocumentsController {
       Number(limit),
       search,
     );
+  }
+
+  @Post('upload')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './uploads/documents',
+
+        filename: (req, file, callback) => {
+          const extension = path.extname(file.originalname);
+
+          const baseName = path
+            .basename(file.originalname, extension)
+            .replace(/[^a-zA-Z0-9-_]/g, '-');
+
+          const filename = `${Date.now()}-${baseName}${extension}`;
+
+          callback(null, filename);
+        },
+      }),
+
+      limits: {
+        fileSize: 10 * 1024 * 1024,
+      },
+    }),
+  )
+  uploadDocumentFile(
+    @UploadedFile()
+    file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    return {
+      fileName: file.originalname,
+
+      filePath: `/uploads/documents/${file.filename}`,
+
+      mimeType: file.mimetype,
+
+      fileSize: file.size,
+
+      /*
+       * Keep this for compatibility with
+       * your existing Attachment model/UI.
+       *
+       * For local storage, publicId will
+       * simply represent the stored filename.
+       */
+      publicId: file.filename,
+    };
+  }
+
+  @Delete('upload/:filename')
+  async deleteDocumentFile(
+    @Param('filename')
+    filename: string,
+  ) {
+    /*
+     * Prevent path traversal such as:
+     *
+     * ../../something
+     */
+    const safeFilename = path.basename(filename);
+
+    const filePath = path.join(
+      process.cwd(),
+      'uploads',
+      'documents',
+      safeFilename,
+    );
+
+    try {
+      await fs.unlink(filePath);
+
+      return {
+        success: true,
+      };
+    } catch (error) {
+      /*
+       * If file is already missing,
+       * don't necessarily break the UI.
+       */
+      console.error('Delete document attachment error:', error);
+
+      return {
+        success: false,
+      };
+    }
   }
 
   /*

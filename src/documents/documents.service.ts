@@ -1120,6 +1120,7 @@ export class DocumentsService {
           currentStatus: true,
           currentOffice: true,
           senderOffice: true,
+          attachments: true,
           createdBy: true,
 
           routes: {
@@ -1816,10 +1817,25 @@ export class DocumentsService {
     const recentRoutes = await this.prisma.documentRoute.findMany({
       where: {
         OR: [
-          { fromOfficeId: { in: currentUser.officeIds } },
-          { toOfficeId: { in: currentUser.officeIds } },
+          {
+            fromOfficeId: {
+              in: currentUser.officeIds,
+            },
+          },
+          {
+            toOfficeId: {
+              in: currentUser.officeIds,
+            },
+          },
         ],
       },
+
+      orderBy: {
+        sentAt: 'desc',
+      },
+
+      take: 10,
+
       include: {
         document: {
           include: {
@@ -1827,38 +1843,125 @@ export class DocumentsService {
             currentStatus: true,
           },
         },
-        sentBy: true,
-        receivedBy: true,
+
+        fromOffice: {
+          select: {
+            id: true,
+            officeCode: true,
+            officeName: true,
+          },
+        },
+
+        toOffice: {
+          select: {
+            id: true,
+            officeCode: true,
+            officeName: true,
+          },
+        },
+
+        sentBy: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+
+        receivedBy: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
       },
     });
 
-    const activities = [
-      ...recentRoutes.map((r) => ({
-        type: 'ROUTE',
-        action: 'DOCUMENT_MOVED',
-        documentId: r.document.id,
-        title: r.document.title,
-        trackingNumber: r.document.trackingNumber,
-        status: r.document.currentStatus.name,
-        from: r.fromOfficeId,
-        to: r.toOfficeId,
-        timestamp: r.sentAt,
-      })),
-    ];
+    const recentActivities = recentRoutes
+      .map((route) => {
+        const isOutgoing = currentUser.officeIds.includes(route.fromOfficeId);
 
-    const recentActivities = activities
-      .sort(
-        (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-      )
+        const isIncoming = currentUser.officeIds.includes(route.toOfficeId);
+
+        const direction = isOutgoing
+          ? 'OUTGOING'
+          : isIncoming
+            ? 'INCOMING'
+            : 'ROUTE';
+
+        const actorName =
+          [route.sentBy?.firstName, route.sentBy?.lastName]
+            .filter(Boolean)
+            .join(' ') ||
+          route.sentBy?.username ||
+          'Unknown user';
+
+        return {
+          /*
+           * IMPORTANT:
+           * Use route ID, not document ID.
+           * One document may have many activity events.
+           */
+          id: route.id,
+
+          documentId: route.document.id,
+
+          type: 'ROUTE',
+
+          action: 'DOCUMENT_ROUTED',
+
+          direction,
+
+          title: route.document.title,
+
+          trackingNumber: route.document.trackingNumber,
+
+          documentType: route.document.documentType?.name ?? 'N/A',
+
+          /*
+           * Route status is more meaningful
+           * for this particular activity than
+           * the document's global status.
+           */
+          status: route.status,
+
+          globalStatus: route.document.currentStatus?.name ?? 'N/A',
+
+          fromOffice: {
+            id: route.fromOffice.id,
+
+            officeCode: route.fromOffice.officeCode,
+
+            officeName: route.fromOffice.officeName,
+          },
+
+          toOffice: {
+            id: route.toOffice.id,
+
+            officeCode: route.toOffice.officeCode,
+
+            officeName: route.toOffice.officeName,
+          },
+
+          actor: {
+            id: route.sentBy.id,
+
+            name: actorName,
+          },
+
+          sentAt: route.sentAt,
+
+          receivedAt: route.receivedAt,
+
+          completedAt: route.completedAt,
+
+          timestamp: route.sentAt,
+        };
+      })
       .slice(0, 3);
-
-    const formattedRecentActivities = recentActivities.map((doc) => ({
-      id: doc.documentId,
-      title: doc.title,
-      trackingNumber: doc.trackingNumber,
-      status: doc.status,
-    }));
 
     const totalDocuments = await this.prisma.document.count({
       where: {
@@ -1964,7 +2067,7 @@ export class DocumentsService {
       archivedDocuments,
       incomingPercentage,
       outgoingPercentage,
-      recentActivities: formattedRecentActivities,
+      recentActivities,
 
       performance: {
         processingEfficiency,
