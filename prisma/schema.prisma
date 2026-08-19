@@ -142,8 +142,9 @@ model Office {
   users           OfficeUser[]
   documentActions DocumentAction[]
 
-  currentDocuments Document[] @relation("CurrentOffice")
-  senderDocuments  Document[] @relation("SenderOffice")
+  currentDocuments     Document[] @relation("CurrentOffice")
+  senderDocuments      Document[] @relation("SenderOffice")
+  responsibleDocuments Document[] @relation("ResponsibleOffice")
 
   sentRoutes     DocumentRoute[] @relation("FromOffice")
   receivedRoutes DocumentRoute[] @relation("ToOffice")
@@ -206,6 +207,9 @@ model Document {
 
   createdById String
 
+  responsibleOfficeId String?
+  responsiblePerson   String?
+
   priority             String?
   confidentialityLevel String?
   classification       String?
@@ -224,12 +228,16 @@ model Document {
 
   senderOffice Office? @relation("SenderOffice", fields: [senderOfficeId], references: [id])
 
+  responsibleOffice Office? @relation("ResponsibleOffice", fields: [responsibleOfficeId], references: [id], onDelete: SetNull)
+
   createdBy User @relation("DocumentCreator", fields: [createdById], references: [id])
 
   attachments DocumentAttachment[]
   actions     DocumentAction[]
   routes      DocumentRoute[]
   logs        DocumentLog[]
+
+  @@index([responsibleOfficeId])
 }
 
 model DocumentAttachment {

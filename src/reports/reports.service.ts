@@ -17,6 +17,7 @@ export class ReportsService {
       currentStatus: true,
       documentType: true,
       currentOffice: true,
+      responsibleOffice: true,
     } satisfies Prisma.DocumentInclude;
 
     type ReportDocument = Prisma.DocumentGetPayload<{
@@ -39,6 +40,11 @@ export class ReportsService {
         doc.currentStatus.name !== 'COMPLETED' &&
         new Date().getTime() > doc.deadline.getTime();
 
+      const responsibleParty =
+        doc.responsibleOffice?.officeName ??
+        doc.responsiblePerson?.trim() ??
+        null;
+
       return {
         id: doc.id,
         trackingNumber: doc.trackingNumber,
@@ -51,6 +57,12 @@ export class ReportsService {
         routedToOffice,
 
         office: doc.currentOffice.officeName,
+
+        responsibleOffice: doc.responsibleOffice,
+
+        responsiblePerson: doc.responsiblePerson,
+
+        responsibleParty,
 
         classification: doc.classification,
         priority: doc.priority,
@@ -262,12 +274,7 @@ export class ReportsService {
     const latestIncomingRouteOfficeByDocumentId = new Map<string, string>();
 
     for (const route of incomingRoutes) {
-      if (!latestIncomingRouteStatusByDocumentId.has(route.documentId)) {
-        latestIncomingRouteStatusByDocumentId.set(
-          route.documentId,
-          route.status,
-        );
-
+      if (!latestIncomingRouteOfficeByDocumentId.has(route.documentId)) {
         latestIncomingRouteOfficeByDocumentId.set(
           route.documentId,
           route.toOffice.officeName,
@@ -289,12 +296,7 @@ export class ReportsService {
     const latestOutgoingRouteOfficeByDocumentId = new Map<string, string>();
 
     for (const route of outgoingRoutes) {
-      if (!latestOutgoingRouteStatusByDocumentId.has(route.documentId)) {
-        latestOutgoingRouteStatusByDocumentId.set(
-          route.documentId,
-          route.status,
-        );
-
+      if (!latestOutgoingRouteOfficeByDocumentId.has(route.documentId)) {
         latestOutgoingRouteOfficeByDocumentId.set(
           route.documentId,
           route.toOffice.officeName,
@@ -582,24 +584,80 @@ export class ReportsService {
       const officeStatus = getOfficeStatus(doc.id);
 
       switch (officeStatus) {
+        /*
+    |--------------------------------------------------------------------------
+    | Routed to reporting office but not yet received
+    |--------------------------------------------------------------------------
+    */
+
         case 'PENDING':
           return 'AWAITING_RECEIPT';
 
+        /*
+    |--------------------------------------------------------------------------
+    | Currently received / under custody
+    |--------------------------------------------------------------------------
+    */
+
         case 'RECEIVED':
+          /*
+           * If the document itself has been completed
+           * while still in the reporting office,
+           * then this is genuinely Completed.
+           */
+          if (
+            doc.currentStatus.name === 'COMPLETED' &&
+            officeIds.includes(doc.currentOfficeId)
+          ) {
+            return 'COMPLETED';
+          }
+
           return 'IN_CUSTODY';
 
+        /*
+    |--------------------------------------------------------------------------
+    | Route handling completed
+    |--------------------------------------------------------------------------
+    |
+    | A COMPLETED route normally means the reporting
+    | office finished its part and routed onward.
+    |
+    | However, if the whole document was completed
+    | while still in this office, show COMPLETED.
+    |
+    */
+
         case 'COMPLETED':
-          return 'COMPLETED';
+          if (
+            doc.currentStatus.name === 'COMPLETED' &&
+            officeIds.includes(doc.currentOfficeId)
+          ) {
+            return 'COMPLETED';
+          }
+
+          return 'FORWARDED';
+
+        /*
+    |--------------------------------------------------------------------------
+    | Returned
+    |--------------------------------------------------------------------------
+    */
 
         case 'RETURNED':
           return 'RETURNED';
 
+        /*
+    |--------------------------------------------------------------------------
+    | Locally Created / Unrouted
+    |--------------------------------------------------------------------------
+    */
+
         default:
-          /*
-           * Locally-created document nga wala pay route
-           * pero currently naa sa selected office.
-           */
           if (officeIds.includes(doc.currentOfficeId)) {
+            if (doc.currentStatus.name === 'COMPLETED') {
+              return 'COMPLETED';
+            }
+
             return 'IN_CUSTODY';
           }
 
@@ -610,7 +668,7 @@ export class ReportsService {
     const totalDocumentsList = totalDocumentsData.map((doc) =>
       mapDocument(
         doc,
-        getOfficeStatus(doc.id),
+        getOfficeReportStatus(doc),
         getRouteStatus(doc.id),
         getRoutedToOffice(doc.id),
         getTimeInOffice(doc.id),
@@ -657,7 +715,7 @@ export class ReportsService {
     const pendingDocumentsList = pendingDocumentsData.map((doc) =>
       mapDocument(
         doc,
-        getOfficeStatus(doc.id),
+        getOfficeReportStatus(doc),
         getRouteStatus(doc.id),
         getRoutedToOffice(doc.id),
         getTimeInOffice(doc.id),
@@ -667,7 +725,7 @@ export class ReportsService {
     const completedDocumentsList = completedDocumentsData.map((doc) =>
       mapDocument(
         doc,
-        getOfficeStatus(doc.id),
+        getOfficeReportStatus(doc),
         getRouteStatus(doc.id),
         getRoutedToOffice(doc.id),
         getTimeInOffice(doc.id),
@@ -677,7 +735,7 @@ export class ReportsService {
     const overdueDocumentsList = overdueDocumentsData.map((doc) =>
       mapDocument(
         doc,
-        getOfficeStatus(doc.id),
+        getOfficeReportStatus(doc),
         getRouteStatus(doc.id),
         getRoutedToOffice(doc.id),
         getTimeInOffice(doc.id),
@@ -710,6 +768,8 @@ export class ReportsService {
         COMPLETED: 'Completed',
 
         RETURNED: 'Returned',
+
+        FORWARDED: 'Forwarded',
 
         UNKNOWN: 'Unknown',
       };

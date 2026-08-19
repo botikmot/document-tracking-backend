@@ -4,6 +4,7 @@ import {
   IsString,
   IsArray,
   ValidateNested,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateDocumentAttachmentDto } from './create-document-attachment.dto';
@@ -40,6 +41,14 @@ export class CreateDocumentDto {
 
   @IsString()
   addressee?: string;
+
+  @IsOptional()
+  @IsUUID()
+  responsibleOfficeId?: string;
+
+  @IsOptional()
+  @IsString()
+  responsiblePerson?: string;
 
   @IsOptional()
   @IsString()

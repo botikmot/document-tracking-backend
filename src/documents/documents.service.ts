@@ -201,6 +201,24 @@ export class DocumentsService {
     }
 
     /*
+|--------------------------------------------------------------------------
+| Validate Responsible Office
+|--------------------------------------------------------------------------
+*/
+
+    if (dto.responsibleOfficeId) {
+      const responsibleOffice = await this.prisma.office.findUnique({
+        where: {
+          id: dto.responsibleOfficeId,
+        },
+      });
+
+      if (!responsibleOffice) {
+        throw new BadRequestException('Responsible office not found');
+      }
+    }
+
+    /*
      |--------------------------------------------------------------------------
      | Create Document
      |--------------------------------------------------------------------------
@@ -220,6 +238,8 @@ export class DocumentsService {
         classification: dto.classification,
         deadline: dto.deadline,
         addressee: dto.addressee,
+        responsibleOfficeId: dto.responsibleOfficeId || null,
+        responsiblePerson: dto.responsiblePerson?.trim() || null,
         createdById: currentUser.userId,
         senderType: dto.senderType,
         senderOfficeId:
@@ -462,21 +482,31 @@ export class DocumentsService {
   }
 
   /*
-   |--------------------------------------------------------------------------
-   | UPDATE DOCUMENT
-   |--------------------------------------------------------------------------
-   */
+|--------------------------------------------------------------------------
+| UPDATE DOCUMENT
+|--------------------------------------------------------------------------
+*/
 
   async update(
     id: string,
     dto: UpdateDocumentDto,
     currentUser: AuthenticatedUser,
   ) {
+    /*
+  |--------------------------------------------------------------------------
+  | Find Document
+  |--------------------------------------------------------------------------
+  */
+
     const document = await this.prisma.document.findUnique({
       where: {
         id,
       },
-      include: { attachments: true, currentOffice: true },
+
+      include: {
+        attachments: true,
+        currentOffice: true,
+      },
     });
 
     if (!document) {
@@ -484,15 +514,15 @@ export class DocumentsService {
     }
 
     /*
-|--------------------------------------------------------------------------
-| Update Permission
-|--------------------------------------------------------------------------
-|
-| Allowed:
-| 1. Original creator
-| 2. User belonging to ORD, while document is currently in ORD
-|
-*/
+  |--------------------------------------------------------------------------
+  | Update Permission
+  |--------------------------------------------------------------------------
+  |
+  | Allowed:
+  | 1. Original creator
+  | 2. User belonging to ORD, while document is currently in ORD
+  |
+  */
 
     const isCreator = document.createdById === currentUser.userId;
 
@@ -503,8 +533,10 @@ export class DocumentsService {
         id: {
           in: currentUser.officeIds,
         },
+
         officeCode: 'ORD',
       },
+
       select: {
         id: true,
       },
@@ -518,46 +550,201 @@ export class DocumentsService {
       throw new ForbiddenException('You cannot update this document');
     }
 
-    const { attachments, ...data } = dto;
+    /*
+  |--------------------------------------------------------------------------
+  | Validate Responsible Office
+  |--------------------------------------------------------------------------
+  |
+  | Responsible office is optional.
+  | Responsible person is also optional and is only a plain string.
+  |
+  */
 
-    const updatedDocument = await this.prisma.document.update({
-      where: {
-        id,
-      },
-      data,
-    });
+    if (dto.responsibleOfficeId) {
+      const responsibleOffice = await this.prisma.office.findUnique({
+        where: {
+          id: dto.responsibleOfficeId,
+        },
 
-    if (attachments && attachments.length > 0) {
-      await this.prisma.documentAttachment.deleteMany({
-        where: { documentId: id },
+        select: {
+          id: true,
+        },
       });
 
-      await this.prisma.documentAttachment.createMany({
-        data: attachments.map((file) => ({
-          documentId: id,
-          fileName: file.fileName,
-          filePath: file.filePath,
-          mimeType: file.mimeType,
-          fileSize: file.fileSize,
-          publicId: file.publicId,
-        })),
-        skipDuplicates: true,
-      });
+      if (!responsibleOffice) {
+        throw new BadRequestException('Responsible office not found');
+      }
     }
 
     /*
-     |--------------------------------------------------------------------------
-     | Audit Log
-     |--------------------------------------------------------------------------
-     */
+  |--------------------------------------------------------------------------
+  | Separate Attachments and Responsibility Fields
+  |--------------------------------------------------------------------------
+  */
 
-    await this.prisma.documentLog.create({
-      data: {
-        documentId: id,
-        userId: currentUser.userId,
-        action: 'DOCUMENT_UPDATED',
-        description: 'Document updated',
-      },
+    const {
+      attachments,
+      responsibleOfficeId,
+      responsiblePerson,
+      ...documentData
+    } = dto;
+
+    /*
+  |--------------------------------------------------------------------------
+  | Update Document Transaction
+  |--------------------------------------------------------------------------
+  */
+
+    const updatedDocument = await this.prisma.$transaction(async (tx) => {
+      /*
+        |--------------------------------------------------------------------------
+        | Update Document Information
+        |--------------------------------------------------------------------------
+        */
+
+      await tx.document.update({
+        where: {
+          id,
+        },
+
+        data: {
+          ...documentData,
+
+          /*
+            |--------------------------------------------------------------------------
+            | Responsible Office
+            |--------------------------------------------------------------------------
+            |
+            | undefined = do not modify existing value
+            | empty/null = remove responsible office
+            | ID = assign responsible office
+            |
+            */
+
+          ...(responsibleOfficeId !== undefined && {
+            responsibleOfficeId: responsibleOfficeId || null,
+          }),
+
+          /*
+            |--------------------------------------------------------------------------
+            | Responsible Person
+            |--------------------------------------------------------------------------
+            |
+            | This is intentionally a plain string.
+            |
+            | undefined = do not modify existing value
+            | empty string = clear responsible person
+            | string = save responsible person's name
+            |
+            */
+
+          ...(responsiblePerson !== undefined && {
+            responsiblePerson: responsiblePerson?.trim() || null,
+          }),
+        },
+      });
+
+      /*
+        |--------------------------------------------------------------------------
+        | Update Attachments
+        |--------------------------------------------------------------------------
+        |
+        | attachments === undefined
+        |   → Leave existing attachments unchanged
+        |
+        | attachments === []
+        |   → Remove all attachments
+        |
+        | attachments contains files
+        |   → Replace existing attachments
+        |
+        */
+
+      if (attachments !== undefined) {
+        /*
+          |--------------------------------------------------------------------------
+          | Remove Existing Attachment Records
+          |--------------------------------------------------------------------------
+          */
+
+        await tx.documentAttachment.deleteMany({
+          where: {
+            documentId: id,
+          },
+        });
+
+        /*
+          |--------------------------------------------------------------------------
+          | Create New Attachments
+          |--------------------------------------------------------------------------
+          */
+
+        if (attachments.length > 0) {
+          await tx.documentAttachment.createMany({
+            data: attachments.map((file) => ({
+              documentId: id,
+
+              fileName: file.fileName,
+
+              filePath: file.filePath,
+
+              mimeType: file.mimeType,
+
+              fileSize: file.fileSize,
+
+              publicId: file.publicId,
+            })),
+
+            skipDuplicates: true,
+          });
+        }
+      }
+
+      /*
+        |--------------------------------------------------------------------------
+        | Audit Log
+        |--------------------------------------------------------------------------
+        */
+
+      await tx.documentLog.create({
+        data: {
+          documentId: id,
+
+          userId: currentUser.userId,
+
+          action: 'DOCUMENT_UPDATED',
+
+          description: 'Document updated',
+        },
+      });
+
+      /*
+        |--------------------------------------------------------------------------
+        | Return Updated Document
+        |--------------------------------------------------------------------------
+        */
+
+      return tx.document.findUnique({
+        where: {
+          id,
+        },
+
+        include: {
+          documentType: true,
+
+          currentStatus: true,
+
+          currentOffice: true,
+
+          senderOffice: true,
+
+          responsibleOffice: true,
+
+          createdBy: true,
+
+          attachments: true,
+        },
+      });
     });
 
     return updatedDocument;
@@ -1123,6 +1310,7 @@ export class DocumentsService {
           currentStatus: true,
           currentOffice: true,
           senderOffice: true,
+          responsibleOffice: true,
           attachments: true,
           createdBy: true,
 
@@ -3305,27 +3493,12 @@ export class DocumentsService {
 
     /*
   |--------------------------------------------------------------------------
-  | NO CHANGE
+  | NORMALIZE REMARKS
   |--------------------------------------------------------------------------
   */
 
-    if (document.currentStatusId === status.id) {
-      return {
-        success: true,
-
-        changed: false,
-
-        message: 'Document already has the requested status.',
-
-        document: {
-          id: document.id,
-
-          trackingNumber: document.trackingNumber,
-
-          status: document.currentStatus.name,
-        },
-      };
-    }
+    const remarks =
+      dto.remarks !== undefined ? dto.remarks.trim() || null : undefined;
 
     /*
   |--------------------------------------------------------------------------
@@ -3337,49 +3510,91 @@ export class DocumentsService {
       const now = new Date();
 
       /*
-       * If external system marks the
-       * document COMPLETED, also complete
-       * the currently active incoming route.
-       */
-      if (requestedStatus === 'COMPLETED') {
-        const activeRoute = await tx.documentRoute.findFirst({
+        |--------------------------------------------------------------------------
+        | FIND CURRENT ACTIVE ROUTE
+        |--------------------------------------------------------------------------
+        |
+        | The external system's remarks belong to the route currently
+        | being handled by the document's current office.
+        |
+        */
+
+      const activeRoute = await tx.documentRoute.findFirst({
+        where: {
+          documentId: document.id,
+
+          toOfficeId: document.currentOfficeId,
+
+          status: {
+            in: ['PENDING', 'RECEIVED'],
+          },
+
+          completedAt: null,
+        },
+
+        orderBy: {
+          sentAt: 'desc',
+        },
+      });
+
+      /*
+        |--------------------------------------------------------------------------
+        | UPDATE ROUTE REMARKS
+        |--------------------------------------------------------------------------
+        |
+        | Only update remarks when remarks was actually included
+        | in the request.
+        |
+        */
+
+      if (activeRoute && remarks !== undefined) {
+        await tx.documentRoute.update({
           where: {
-            documentId: document.id,
-
-            toOfficeId: document.currentOfficeId,
-
-            status: 'RECEIVED',
-
-            completedAt: null,
+            id: activeRoute.id,
           },
 
-          orderBy: {
-            sentAt: 'desc',
-          },
-
-          select: {
-            id: true,
+          data: {
+            remarks,
           },
         });
-
-        if (activeRoute) {
-          await tx.documentRoute.update({
-            where: {
-              id: activeRoute.id,
-            },
-
-            data: {
-              status: 'COMPLETED',
-
-              completedAt: now,
-            },
-          });
-        }
       }
 
       /*
-       * Update global document status.
-       */
+        |--------------------------------------------------------------------------
+        | COMPLETE ACTIVE ROUTE
+        |--------------------------------------------------------------------------
+        */
+
+      if (requestedStatus === 'COMPLETED' && activeRoute) {
+        await tx.documentRoute.update({
+          where: {
+            id: activeRoute.id,
+          },
+
+          data: {
+            status: 'COMPLETED',
+
+            completedAt: now,
+
+            /*
+             * If remarks was passed,
+             * save it at the same time.
+             */
+            ...(remarks !== undefined
+              ? {
+                  remarks,
+                }
+              : {}),
+          },
+        });
+      }
+
+      /*
+        |--------------------------------------------------------------------------
+        | UPDATE GLOBAL DOCUMENT STATUS
+        |--------------------------------------------------------------------------
+        */
+
       const updatedDocument = await tx.document.update({
         where: {
           id: document.id,
@@ -3398,28 +3613,54 @@ export class DocumentsService {
         },
       });
 
-      return updatedDocument;
+      /*
+        |--------------------------------------------------------------------------
+        | RETURN RESULT + ROUTE
+        |--------------------------------------------------------------------------
+        */
+
+      return {
+        document: updatedDocument,
+
+        route: activeRoute
+          ? await tx.documentRoute.findUnique({
+              where: {
+                id: activeRoute.id,
+              },
+            })
+          : null,
+      };
     });
+
+    /*
+  |--------------------------------------------------------------------------
+  | RESPONSE
+  |--------------------------------------------------------------------------
+  */
 
     return {
       success: true,
 
-      changed: true,
+      changed: document.currentStatusId !== status.id || remarks !== undefined,
 
       message: 'Document status updated successfully.',
 
       document: {
-        id: result.id,
+        id: result.document.id,
 
-        trackingNumber: result.trackingNumber,
+        trackingNumber: result.document.trackingNumber,
 
-        title: result.title,
+        title: result.document.title,
 
-        status: result.currentStatus.name,
+        status: result.document.currentStatus.name,
 
-        currentOffice: result.currentOffice?.officeName ?? null,
+        currentOffice: result.document.currentOffice?.officeName ?? null,
 
-        remarks: dto.remarks ?? null,
+        /*
+         * Return what was actually
+         * saved in the database.
+         */
+        remarks: result.route?.remarks ?? null,
       },
     };
   }

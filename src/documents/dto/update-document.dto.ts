@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsDate, IsArray } from 'class-validator';
+import { IsOptional, IsString, IsDate, IsArray, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 export class UpdateDocumentDto {
   @IsOptional()
@@ -29,6 +29,14 @@ export class UpdateDocumentDto {
   @IsOptional()
   @IsString()
   priority?: string;
+
+  @IsOptional()
+  @IsUUID()
+  responsibleOfficeId?: string;
+
+  @IsOptional()
+  @IsString()
+  responsiblePerson?: string;
 
   @IsOptional()
   @IsString()
