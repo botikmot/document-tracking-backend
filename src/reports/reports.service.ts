@@ -15,9 +15,44 @@ export class ReportsService {
 
     const documentInclude = {
       currentStatus: true,
+
       documentType: true,
+
       currentOffice: true,
+
       responsibleOffice: true,
+
+      /*
+       * Actions made by the selected
+       * reporting office during the
+       * requested report period.
+       */
+      actions: {
+        where: {
+          ...(officeIds.length
+            ? {
+                officeId: {
+                  in: officeIds,
+                },
+              }
+            : {}),
+
+          createdAt: {
+            gte: startDate,
+            lte: endDate,
+          },
+        },
+
+        select: {
+          id: true,
+          officeId: true,
+          createdAt: true,
+        },
+
+        orderBy: {
+          createdAt: 'desc',
+        },
+      },
     } satisfies Prisma.DocumentInclude;
 
     type ReportDocument = Prisma.DocumentGetPayload<{
@@ -44,6 +79,12 @@ export class ReportsService {
         doc.responsibleOffice?.officeName ??
         doc.responsiblePerson?.trim() ??
         null;
+
+      const acted = doc.actions.length > 0;
+
+      const actionCount = doc.actions.length;
+
+      const lastActionAt = doc.actions[0]?.createdAt ?? null;
 
       return {
         id: doc.id,
@@ -81,6 +122,9 @@ export class ReportsService {
             : officeStatus === 'PENDING'
               ? 'AWAITING_RECEIPT'
               : 'ON_TIME',
+        acted,
+        actionCount,
+        lastActionAt,
       };
     };
 
@@ -698,8 +742,34 @@ export class ReportsService {
         pendingStatuses.has(doc.currentStatus.name),
     );
 
+    /*
+|--------------------------------------------------------------------------
+| ACTED DOCUMENTS
+|--------------------------------------------------------------------------
+|
+| A document is considered ACTED only when the selected/reporting
+| office has an actual DocumentAction.
+|
+*/
+
+    const actedDocumentsData = totalDocumentsData.filter(
+      (doc) => doc.actions.length > 0,
+    );
+
+    /*
+|--------------------------------------------------------------------------
+| COMPLETED DOCUMENTS
+|--------------------------------------------------------------------------
+|
+| Completed means the entire document lifecycle is completed,
+| not merely forwarded by the reporting office.
+|
+*/
+
     const completedDocumentsData = totalDocumentsData.filter(
-      (doc) => getOfficeStatus(doc.id) === 'COMPLETED',
+      (doc) =>
+        officeIds.includes(doc.currentOfficeId) &&
+        doc.currentStatus.name === 'COMPLETED',
     );
 
     const now = new Date();
@@ -709,10 +779,24 @@ export class ReportsService {
         officeIds.includes(doc.currentOfficeId) &&
         doc.deadline !== null &&
         doc.deadline.getTime() < now.getTime() &&
-        getOfficeStatus(doc.id) !== 'COMPLETED',
+        /*
+         * Completed documents can
+         * never be overdue anymore.
+         */
+        doc.currentStatus.name !== 'COMPLETED',
     );
 
     const pendingDocumentsList = pendingDocumentsData.map((doc) =>
+      mapDocument(
+        doc,
+        getOfficeReportStatus(doc),
+        getRouteStatus(doc.id),
+        getRoutedToOffice(doc.id),
+        getTimeInOffice(doc.id),
+      ),
+    );
+
+    const actedDocumentsList = actedDocumentsData.map((doc) =>
       mapDocument(
         doc,
         getOfficeReportStatus(doc),
@@ -904,12 +988,17 @@ export class ReportsService {
     );
 
     /*
-    |--------------------------------------------------------------------------
-    | Completion rate - document level
-    |--------------------------------------------------------------------------
-    */
+|--------------------------------------------------------------------------
+| Completion rate - document level
+|--------------------------------------------------------------------------
+|
+| Global completion of documents.
+| This is different from office action/performance.
+|
+*/
 
     const totalDocuments = totalDocumentsData.length;
+
     const completedDocuments = completedDocumentsData.length;
 
     const completionRate =
@@ -918,14 +1007,33 @@ export class ReportsService {
         : Number(((completedDocuments / totalDocuments) * 100).toFixed(1));
 
     /*
-    |--------------------------------------------------------------------------
-    | Office processing efficiency - route level
-    |--------------------------------------------------------------------------
-    |
-    | Cohort = routes RECEIVED by the selected office(s) during the report
-    | period. This is a better office-performance basis than document.createdAt.
-    |
-    */
+|--------------------------------------------------------------------------
+| Action rate - document level
+|--------------------------------------------------------------------------
+|
+| A document is ACTED when the selected reporting office has
+| an actual DocumentAction during the reporting period.
+|
+*/
+
+    const actedDocuments = actedDocumentsData.length;
+
+    const actionRate =
+      totalDocuments === 0
+        ? 0
+        : Number(((actedDocuments / totalDocuments) * 100).toFixed(1));
+
+    /*
+|--------------------------------------------------------------------------
+| Route completion rate - office handling level
+|--------------------------------------------------------------------------
+|
+| Cohort = routes actually RECEIVED by the selected office(s).
+|
+| This measures whether the office finished its custody/handling
+| of received documents.
+|
+*/
 
     const receivedRoutes = incomingRoutes.filter(
       (route) => route.receivedAt !== null,
@@ -936,12 +1044,19 @@ export class ReportsService {
     );
 
     const totalReceivedRoutes = receivedRoutes.length;
+
     const completedCount = completedRoutes.length;
 
-    const efficiencyRate =
+    const routeCompletionRate =
       totalReceivedRoutes === 0
         ? 0
         : Number(((completedCount / totalReceivedRoutes) * 100).toFixed(1));
+
+    /*
+|--------------------------------------------------------------------------
+| Average processing time
+|--------------------------------------------------------------------------
+*/
 
     const processingTimes = completedRoutes.map(
       (route) => route.completedAt!.getTime() - route.receivedAt!.getTime(),
@@ -960,6 +1075,17 @@ export class ReportsService {
 
     const averageProcessingDays = averageProcessingTime / (1000 * 60 * 60 * 24);
 
+    /*
+|--------------------------------------------------------------------------
+| Time efficiency
+|--------------------------------------------------------------------------
+|
+| Current baseline target = 3 days.
+|
+| Maximum score = 100%.
+|
+*/
+
     const targetProcessingDays = 3;
 
     let timeEfficiency = 0;
@@ -970,8 +1096,19 @@ export class ReportsService {
 
     timeEfficiency = Math.min(timeEfficiency, 100);
 
+    /*
+|--------------------------------------------------------------------------
+| Overall processing efficiency
+|--------------------------------------------------------------------------
+|
+| 50% = Actual office action
+| 30% = Route completion
+| 20% = Processing speed
+|
+*/
+
     const processingEfficiency = Math.round(
-      efficiencyRate * 0.7 + timeEfficiency * 0.3,
+      actionRate * 0.5 + routeCompletionRate * 0.3 + timeEfficiency * 0.2,
     );
 
     /*
@@ -1010,6 +1147,11 @@ export class ReportsService {
           documents: pendingDocumentsList,
         },
 
+        actedDocuments: {
+          count: actedDocumentsData.length,
+          documents: actedDocumentsList,
+        },
+
         completedDocuments: {
           count: completedDocuments,
           documents: completedDocumentsList,
@@ -1021,8 +1163,9 @@ export class ReportsService {
         },
 
         completionRate,
+        actionRate,
         processingEfficiency,
-        efficiencyRate,
+        efficiencyRate: routeCompletionRate,
         averageProcessingHours,
       },
 
@@ -1030,6 +1173,9 @@ export class ReportsService {
       documentTypeBreakdown,
       byPriority,
       monthlyTrend,
+      actionRate,
+      timeEfficiency,
+      processingEfficiency,
 
       analytics: {
         averageProcessingHours,
