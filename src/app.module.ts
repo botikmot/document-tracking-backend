@@ -17,6 +17,10 @@ import { SmsModule } from './sms/sms.module';
 import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
 import { CommunityModule } from './community/community.module';
+import { ClientsModule } from './clients/clients.module';
+import { ClientAuthModule } from './client-auth/client-auth.module';
+import { ClientApplicationsModule } from './client-applications/client-applications.module';
+import { ClientServiceTypesModule } from './client-service-types/client-service-types.module';
 
 @Module({
   imports: [
@@ -36,6 +40,10 @@ import { CommunityModule } from './community/community.module';
     ReportsModule,
     SettingsModule,
     CommunityModule,
+    ClientsModule,
+    ClientAuthModule,
+    ClientApplicationsModule,
+    ClientServiceTypesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

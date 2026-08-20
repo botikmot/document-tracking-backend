@@ -15,6 +15,7 @@ export class CreateDocumentAttachmentDto {
   @IsInt()
   fileSize?: number;
 
+  @IsOptional()
   @IsString()
-  publicId!: string;
+  publicId?: string;
 }

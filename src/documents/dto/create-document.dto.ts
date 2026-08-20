@@ -67,6 +67,10 @@ export class CreateDocumentDto {
   senderOrganization?: string;
 
   @IsOptional()
+  @IsUUID()
+  currentOfficeId?: string;
+
+  @IsOptional()
   @IsString()
   senderContact?: string;
 

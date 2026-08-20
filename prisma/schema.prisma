@@ -41,6 +41,37 @@ enum CommunityType {
   DIRECT
 }
 
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+  PENDING_VERIFICATION
+}
+
+enum ClientApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  ADDITIONAL_REQUIREMENTS
+  RESUBMITTED
+  ACCEPTED
+  REJECTED
+  PROCESSING
+  COMPLETED
+  CANCELLED
+}
+
+enum ClientApplicationAttachmentType {
+  LETTER_REQUEST
+  SUPPORTING_DOCUMENT
+}
+
+enum ClientApplicationKind {
+  APPLICATION
+  DOCUMENT_REQUEST
+  FOLLOW_UP
+  GENERAL_INQUIRY
+}
+
 model User {
   id           String  @id @default(uuid())
   employeeId   String? @unique
@@ -139,8 +170,10 @@ model Office {
   organizationUnitId String
   organizationUnit   OrganizationUnit @relation(fields: [organizationUnitId], references: [id])
 
-  users           OfficeUser[]
-  documentActions DocumentAction[]
+  users              OfficeUser[]
+  documentActions    DocumentAction[]
+  clientServiceTypes ClientServiceType[]
+  clientApplications ClientApplication[]
 
   currentDocuments     Document[] @relation("CurrentOffice")
   senderDocuments      Document[] @relation("SenderOffice")
@@ -232,6 +265,8 @@ model Document {
 
   createdBy User @relation("DocumentCreator", fields: [createdById], references: [id])
 
+  clientApplication ClientApplication?
+
   attachments DocumentAttachment[]
   actions     DocumentAction[]
   routes      DocumentRoute[]
@@ -249,7 +284,7 @@ model DocumentAttachment {
   filePath String
   mimeType String?
   fileSize Int?
-  publicId String
+  publicId String?
 
   uploadedAt DateTime @default(now())
 
@@ -463,4 +498,177 @@ model DocumentAction {
   @@index([documentId])
   @@index([userId])
   @@index([officeId])
+}
+
+model Client {
+  id String @id @default(cuid())
+
+  firstName  String
+  middleName String?
+  lastName   String
+  suffix     String?
+
+  email        String  @unique
+  mobileNumber String?
+  address      String?
+
+  organizationName String?
+
+  passwordHash String
+
+  status ClientStatus @default(PENDING_VERIFICATION)
+
+  emailVerifiedAt DateTime?
+
+  emailVerificationToken       String?
+  emailVerificationTokenExpiry DateTime?
+
+  applications ClientApplication[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lastName, firstName])
+  @@index([status])
+}
+
+model ClientApplication {
+  id String @id @default(cuid())
+
+  referenceNumber String @unique
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  transactionType String
+
+  title       String
+  description String?
+  kind        ClientApplicationKind @default(APPLICATION)
+
+  relatedTrackingNumber String?
+
+  status ClientApplicationStatus @default(DRAFT)
+
+  reviewedByUserId String?
+
+  reviewRemarks                 String?
+  additionalRequirementsRemarks String?
+  rejectionReason               String?
+
+  // Once accepted by DENR Records,
+  // this can point to the actual eDATS document.
+  documentId        String?   @unique
+  document          Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  serviceTypeId     String?
+  receivingOfficeId String?
+
+  receivingOffice Office? @relation(fields: [receivingOfficeId], references: [id], onDelete: SetNull)
+
+  serviceType ClientServiceType? @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
+
+  attachments ClientApplicationAttachment[]
+
+  submittedAt   DateTime?
+  resubmittedAt DateTime?
+  reviewedAt    DateTime?
+  acceptedAt    DateTime?
+  rejectedAt    DateTime?
+  completedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([serviceTypeId])
+  @@index([kind])
+  @@index([status])
+  @@index([reviewedByUserId])
+  @@index([createdAt])
+}
+
+model ClientApplicationAttachment {
+  id String @id @default(cuid())
+
+  applicationId String
+
+  application ClientApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  type          ClientApplicationAttachmentType @default(SUPPORTING_DOCUMENT)
+  requirementId String?
+
+  requirement ClientServiceRequirement? @relation(fields: [requirementId], references: [id], onDelete: SetNull)
+
+  fileName     String
+  originalName String
+  filePath     String
+  mimeType     String
+  fileSize     Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([applicationId])
+  @@index([type])
+  @@index([requirementId])
+}
+
+model ClientServiceType {
+  id String @id @default(cuid())
+
+  code String @unique
+  name String
+
+  description String?
+
+  kind ClientApplicationKind
+
+  requiresLetterRequest  Boolean                    @default(false)
+  requiresTrackingNumber Boolean                    @default(false)
+  allowsAttachments      Boolean                    @default(true)
+  requirements           ClientServiceRequirement[]
+
+  isActive Boolean @default(true)
+
+  receivingOfficeId String?
+  receivingOffice   Office? @relation(fields: [receivingOfficeId], references: [id], onDelete: SetNull)
+
+  applications ClientApplication[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kind])
+  @@index([isActive])
+  @@index([receivingOfficeId])
+}
+
+model ClientServiceRequirement {
+  id String @id @default(cuid())
+
+  serviceTypeId String
+  serviceType   ClientServiceType @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
+
+  code        String
+  name        String
+  description String?
+
+  isRequired     Boolean @default(true)
+  allowsMultiple Boolean @default(false)
+  isActive       Boolean @default(true)
+
+  attachments ClientApplicationAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([serviceTypeId, code])
+  @@index([serviceTypeId])
+  @@index([isActive])
+}
+
+model DocumentTrackingCounter {
+  year       Int @id
+  lastNumber Int @default(0)
+
+  updatedAt DateTime @updatedAt
 }

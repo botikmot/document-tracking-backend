@@ -138,10 +138,34 @@ export class DocumentsService {
    |--------------------------------------------------------------------------
    */
 
-  private async generateTrackingNumber() {
+  private async generateTrackingNumber(
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
     const year = new Date().getFullYear();
-    const count = await this.prisma.document.count();
-    const sequence = String(count + 1).padStart(6, '0');
+
+    const counter = await db.documentTrackingCounter.upsert({
+      where: {
+        year,
+      },
+
+      create: {
+        year,
+        lastNumber: 1,
+      },
+
+      update: {
+        lastNumber: {
+          increment: 1,
+        },
+      },
+
+      select: {
+        lastNumber: true,
+      },
+    });
+
+    const sequence = String(counter.lastNumber).padStart(6, '0');
+
     return `DOC-${year}-${sequence}`;
   }
 
@@ -155,18 +179,26 @@ export class DocumentsService {
     dto: CreateDocumentDto,
 
     currentUser: AuthenticatedUser,
+    tx?: Prisma.TransactionClient,
   ) {
     /*
      |--------------------------------------------------------------------------
      | Verify user belongs to office
      |--------------------------------------------------------------------------
      */
+    const db = tx ?? this.prisma;
 
-    const officeUser = await this.prisma.officeUser.findFirst({
+    const officeUser = await db.officeUser.findFirst({
       where: {
-        //officeId: dto.currentOfficeId,
         userId: currentUser.userId,
+
+        ...(dto.currentOfficeId
+          ? {
+              officeId: dto.currentOfficeId,
+            }
+          : {}),
       },
+
       include: {
         office: true,
       },
@@ -182,7 +214,7 @@ export class DocumentsService {
      |--------------------------------------------------------------------------
      */
 
-    const trackingNumber = await this.generateTrackingNumber();
+    const trackingNumber = await this.generateTrackingNumber(db);
 
     /*
      |--------------------------------------------------------------------------
@@ -190,7 +222,7 @@ export class DocumentsService {
      |--------------------------------------------------------------------------
      */
 
-    const draftStatus = await this.prisma.documentStatus.findUnique({
+    const draftStatus = await db.documentStatus.findUnique({
       where: {
         name: 'DRAFT',
       },
@@ -207,7 +239,7 @@ export class DocumentsService {
 */
 
     if (dto.responsibleOfficeId) {
-      const responsibleOffice = await this.prisma.office.findUnique({
+      const responsibleOffice = await db.office.findUnique({
         where: {
           id: dto.responsibleOfficeId,
         },
@@ -224,7 +256,7 @@ export class DocumentsService {
      |--------------------------------------------------------------------------
      */
 
-    const document = await this.prisma.document.create({
+    const document = await db.document.create({
       data: {
         trackingNumber,
         documentTypeId: dto.documentTypeId,
@@ -253,7 +285,7 @@ export class DocumentsService {
           dto.senderType === 'AGENCY' ||
           dto.senderType === 'CLIENT' ||
           dto.senderType === 'COMPANY'
-            ? dto.senderName
+            ? dto.senderContact
             : null,
         attachments: {
           create:
@@ -283,7 +315,7 @@ export class DocumentsService {
      |--------------------------------------------------------------------------
      */
 
-    await this.prisma.documentLog.create({
+    await db.documentLog.create({
       data: {
         documentId: document.id,
         userId: currentUser.userId,

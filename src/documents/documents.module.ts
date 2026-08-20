@@ -15,5 +15,6 @@ import { PrismaModule } from '../prisma/prisma.module';
     PublicDocumentsController,
   ],
   providers: [DocumentsService],
+  exports: [DocumentsService],
 })
 export class DocumentsModule {}
