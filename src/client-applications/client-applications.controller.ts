@@ -164,6 +164,24 @@ export class ClientApplicationsController {
     );
   }
 
+  @Get(':id/tracking')
+  getTracking(
+    @Req()
+    req: {
+      user: {
+        clientId: string;
+      };
+    },
+
+    @Param('id')
+    applicationId: string,
+  ) {
+    return this.clientApplicationsService.getTracking(
+      req.user.clientId,
+      applicationId,
+    );
+  }
+
   @Get(':id/attachments/:attachmentId/download')
   async downloadAttachment(
     @Req()

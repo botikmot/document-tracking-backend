@@ -135,6 +135,40 @@ export class ClientApplicationsService {
     }
   }
 
+  private getClientFriendlyDocumentStatus(status?: string | null) {
+    switch (status) {
+      case 'DRAFT':
+        return 'ACCEPTED';
+
+      case 'PENDING':
+        return 'FORWARDING';
+
+      case 'FOR_REVIEW':
+        return 'UNDER_REVIEW';
+
+      case 'FOR_APPROVAL':
+        return 'FOR_APPROVAL';
+
+      case 'ON_PROCESS':
+        return 'PROCESSING';
+
+      case 'FOR_RELEASE':
+        return 'FOR_RELEASE';
+
+      case 'APPROVED':
+        return 'APPROVED';
+
+      case 'COMPLETED':
+        return 'COMPLETED';
+
+      case 'REJECTED':
+        return 'REJECTED';
+
+      default:
+        return 'PROCESSING';
+    }
+  }
+
   async create(clientId: string, dto: CreateClientApplicationDto) {
     /*
      * ------------------------------------------------------------
@@ -1794,5 +1828,214 @@ export class ClientApplicationsService {
         resubmittedAt: new Date(),
       },
     });
+  }
+
+  async getTracking(clientId: string, applicationId: string) {
+    /*
+     * ------------------------------------------------------------
+     * VERIFY CLIENT
+     * ------------------------------------------------------------
+     */
+    await this.ensureClientCanUsePortal(clientId);
+
+    /*
+     * ------------------------------------------------------------
+     * GET CLIENT APPLICATION
+     * ------------------------------------------------------------
+     *
+     * clientId prevents Client A from tracking
+     * Client B's application.
+     */
+    const application = await this.prisma.clientApplication.findFirst({
+      where: {
+        id: applicationId,
+        clientId,
+      },
+
+      select: {
+        id: true,
+
+        referenceNumber: true,
+        transactionType: true,
+
+        status: true,
+
+        submittedAt: true,
+        acceptedAt: true,
+        completedAt: true,
+
+        documentId: true,
+
+        document: {
+          select: {
+            id: true,
+
+            trackingNumber: true,
+            title: true,
+
+            createdAt: true,
+
+            currentStatus: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+
+            currentOffice: {
+              select: {
+                id: true,
+                officeCode: true,
+                officeName: true,
+              },
+            },
+
+            responsibleOffice: {
+              select: {
+                id: true,
+                officeCode: true,
+                officeName: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!application) {
+      throw new NotFoundException('Application not found.');
+    }
+
+    /*
+     * ------------------------------------------------------------
+     * APPLICATION NOT YET ACCEPTED
+     * ------------------------------------------------------------
+     */
+    if (!application.documentId || !application.document) {
+      return {
+        applicationReference: application.referenceNumber,
+
+        transactionType: application.transactionType,
+
+        applicationStatus: application.status,
+
+        officialTrackingNumber: null,
+
+        documentStatus: null,
+
+        currentOffice: null,
+
+        responsibleOffice: null,
+
+        submittedAt: application.submittedAt,
+
+        acceptedAt: application.acceptedAt,
+
+        message:
+          'An official document tracking number has not yet been assigned.',
+      };
+    }
+
+    /*
+     * ------------------------------------------------------------
+     * GET DOCUMENT ROUTING HISTORY
+     * ------------------------------------------------------------
+     */
+    const routes = await this.prisma.documentRoute.findMany({
+      where: {
+        documentId: application.document.id,
+      },
+
+      orderBy: {
+        sentAt: 'asc',
+      },
+
+      select: {
+        id: true,
+
+        status: true,
+
+        remarks: true,
+
+        sentAt: true,
+        receivedAt: true,
+        completedAt: true,
+
+        fromOffice: {
+          select: {
+            id: true,
+            officeCode: true,
+            officeName: true,
+          },
+        },
+
+        toOffice: {
+          select: {
+            id: true,
+            officeCode: true,
+            officeName: true,
+          },
+        },
+      },
+    });
+
+    const internalStatus = application.document.currentStatus?.name;
+    /*
+     * ------------------------------------------------------------
+     * RESPONSE
+     * ------------------------------------------------------------
+     */
+    return {
+      applicationReference: application.referenceNumber,
+
+      transactionType: application.transactionType,
+
+      applicationStatus: application.status,
+
+      submittedAt: application.submittedAt,
+
+      acceptedAt: application.acceptedAt,
+
+      document: {
+        id: application.document.id,
+
+        trackingNumber: application.document.trackingNumber,
+
+        title: application.document.title,
+
+        status: application.document.currentStatus?.name,
+
+        displayStatus: this.getClientFriendlyDocumentStatus(internalStatus),
+
+        currentOffice: application.document.currentOffice,
+
+        responsibleOffice: application.document.responsibleOffice,
+
+        createdAt: application.document.createdAt,
+      },
+
+      timeline: routes.map((route) => ({
+        id: route.id,
+
+        status: route.status,
+
+        fromOffice: route.fromOffice,
+
+        toOffice: route.toOffice,
+
+        sentAt: route.sentAt,
+
+        receivedAt: route.receivedAt,
+
+        completedAt: route.completedAt,
+
+        /*
+         * We can decide later if internal remarks
+         * should be exposed to clients.
+         *
+         * For now I recommend NOT exposing them.
+         */
+      })),
+    };
   }
 }
