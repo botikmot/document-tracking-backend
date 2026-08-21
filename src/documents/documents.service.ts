@@ -16,8 +16,11 @@ import { ReturnDocumentDto } from './dto/return-document.dto';
 import { DecisionDocumentDto } from './dto/decision-document.dto';
 import { PublicUpdateDocumentStatusDto } from './dto/public-update-document-status.dto';
 import { CreateDocumentActionDto } from './dto/create-document-action.dto';
+import { UpdateDocumentActionDto } from './dto/update-document-action.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { Prisma } from '@prisma/client';
+import * as path from 'node:path';
+import { unlink } from 'node:fs/promises';
 
 type TrackingDocument = Prisma.DocumentGetPayload<{
   include: {
@@ -167,6 +170,20 @@ export class DocumentsService {
     const sequence = String(counter.lastNumber).padStart(6, '0');
 
     return `DOC-${year}-${sequence}`;
+  }
+
+  private getStatusFromLog(description?: string | null) {
+    if (!description) {
+      return null;
+    }
+
+    const prefix = 'Document marked as ';
+
+    if (!description.startsWith(prefix)) {
+      return null;
+    }
+
+    return description.replace(prefix, '').trim();
   }
 
   /*
@@ -1295,7 +1312,14 @@ export class DocumentsService {
 
       currentStatus: {
         name: {
-          in: ['PENDING', 'FOR_REVIEW', 'FOR_APPROVAL', 'ON_PROCESS'],
+          in: [
+            'PENDING',
+            'FOR_REVIEW',
+            'FOR_APPROVAL',
+            'FOR_RELEASE',
+            'ON_PROCESS',
+            'APPROVED',
+          ],
         },
       },
     };
@@ -1358,6 +1382,22 @@ export class DocumentsService {
               sentAt: 'asc',
             },
           },
+          logs: {
+            where: {
+              action: 'STATUS_UPDATED',
+            },
+
+            orderBy: {
+              createdAt: 'asc',
+            },
+
+            select: {
+              id: true,
+              action: true,
+              description: true,
+              createdAt: true,
+            },
+          },
           actions: {
             orderBy: {
               createdAt: 'desc',
@@ -1394,6 +1434,156 @@ export class DocumentsService {
       }),
     ]);
 
+    const formattedDocuments = documents.map((document) => {
+      /*
+    |--------------------------------------------------------------------------
+    | DEFAULT STATUS
+    |--------------------------------------------------------------------------
+    |
+    | Only used when there is no known
+    | historical status yet.
+    |
+    */
+
+      let lastKnownStatus = 'ON_PROCESS';
+
+      const routes = document.routes.map((route, index) => {
+        /*
+          |--------------------------------------------------------------------------
+          | WHEN DID THIS "FROM OFFICE" START HANDLING?
+          |--------------------------------------------------------------------------
+          */
+
+        const previousRoute = index > 0 ? document.routes[index - 1] : null;
+
+        const officeStartedAt =
+          previousRoute?.receivedAt ??
+          previousRoute?.sentAt ??
+          document.createdAt;
+
+        /*
+          |--------------------------------------------------------------------------
+          | FIND STATUS CHANGES MADE WHILE THIS OFFICE HAD THE DOCUMENT
+          |--------------------------------------------------------------------------
+          */
+
+        const officeStatusLogs = document.logs.filter((log) => {
+          const status = this.getStatusFromLog(log.description);
+
+          if (!status) {
+            return false;
+          }
+
+          const logTime = log.createdAt.getTime();
+
+          return (
+            logTime >= officeStartedAt.getTime() &&
+            logTime <= route.sentAt.getTime()
+          );
+        });
+
+        /*
+          |--------------------------------------------------------------------------
+          | EXPLICIT STATUS FROM THIS OFFICE
+          |--------------------------------------------------------------------------
+          */
+
+        const latestOfficeStatusLog = officeStatusLogs.at(-1);
+
+        const explicitStatus = this.getStatusFromLog(
+          latestOfficeStatusLog?.description,
+        );
+
+        /*
+         * Only change lastKnownStatus
+         * when this office explicitly
+         * changed the status.
+         *
+         * If undefined/null:
+         * carry forward previous status.
+         */
+        if (explicitStatus) {
+          lastKnownStatus = explicitStatus;
+        }
+
+        let documentStatus = lastKnownStatus;
+
+        /*
+          |--------------------------------------------------------------------------
+          | CURRENT / LATEST DESTINATION
+          |--------------------------------------------------------------------------
+          |
+          | Last route may already have been
+          | received by the destination office,
+          | but that office has not routed it yet.
+          |
+          | We therefore look for status updates
+          | after the destination received it.
+          |
+          */
+
+        const isLatestRoute = index === document.routes.length - 1;
+
+        const isCurrentDestination =
+          document.currentOfficeId === route.toOfficeId;
+
+        if (isLatestRoute && isCurrentDestination) {
+          const destinationStartedAt = route.receivedAt ?? route.sentAt;
+
+          const destinationStatusLogs = document.logs.filter((log) => {
+            const status = this.getStatusFromLog(log.description);
+
+            if (!status) {
+              return false;
+            }
+
+            return log.createdAt.getTime() >= destinationStartedAt.getTime();
+          });
+
+          const latestDestinationLog = destinationStatusLogs.at(-1);
+
+          const destinationStatus = this.getStatusFromLog(
+            latestDestinationLog?.description,
+          );
+
+          /*
+           * Again, only replace if
+           * there is an explicit status.
+           */
+          if (destinationStatus) {
+            documentStatus = destinationStatus;
+
+            lastKnownStatus = destinationStatus;
+          }
+        }
+
+        return {
+          ...route,
+
+          /*
+           * Keep route.status untouched.
+           *
+           * This new field represents
+           * document workflow status.
+           */
+          documentStatus,
+        };
+      });
+
+      return {
+        ...document,
+
+        routes,
+
+        /*
+         * Optional:
+         * don't expose raw status logs
+         * if frontend doesn't need them.
+         */
+        logs: undefined,
+      };
+    });
+
     /*
    |------------------------------------------------------------
    | RETURN
@@ -1401,7 +1591,7 @@ export class DocumentsService {
    */
 
     return {
-      data: documents,
+      data: formattedDocuments,
 
       meta: {
         total,
@@ -1469,7 +1659,9 @@ export class DocumentsService {
       },
 
       currentStatus: {
-        name: 'COMPLETED',
+        name: {
+          in: ['COMPLETED', 'END_TRANSACTION'],
+        },
       },
     };
 
@@ -1878,6 +2070,25 @@ export class DocumentsService {
             sentAt: 'asc',
           },
         },
+        /*
+         * Historical status changes
+         */
+        logs: {
+          where: {
+            action: 'STATUS_UPDATED',
+          },
+
+          orderBy: {
+            createdAt: 'asc',
+          },
+
+          select: {
+            id: true,
+            action: true,
+            description: true,
+            createdAt: true,
+          },
+        },
       },
     });
 
@@ -1891,6 +2102,167 @@ export class DocumentsService {
    |--------------------------------------------------------------------------
    */
 
+    const getStatusFromLog = (description?: string | null) => {
+      if (!description) {
+        return null;
+      }
+
+      const prefix = 'Document marked as ';
+
+      if (!description.startsWith(prefix)) {
+        return null;
+      }
+
+      return description.replace(prefix, '').trim();
+    };
+
+    let lastKnownStatus = 'ON_PROCESS';
+
+    const routes = document.routes.map((route, index) => {
+      /*
+    |--------------------------------------------------------------------------
+    | OFFICE HANDLING START
+    |--------------------------------------------------------------------------
+    |
+    | First office:
+    | document.createdAt
+    |
+    | Following offices:
+    | when the previous route was received
+    |
+    */
+
+      const previousRoute = index > 0 ? document.routes[index - 1] : null;
+
+      const officeStartedAt =
+        previousRoute?.receivedAt ??
+        previousRoute?.sentAt ??
+        document.createdAt;
+
+      /*
+    |--------------------------------------------------------------------------
+    | STATUS CHANGES MADE WHILE THIS OFFICE HAD THE DOCUMENT
+    |--------------------------------------------------------------------------
+    */
+
+      const statusLogsInThisOffice = document.logs.filter((log) => {
+        const status = getStatusFromLog(log.description);
+
+        if (!status) {
+          return false;
+        }
+
+        const logTime = log.createdAt.getTime();
+
+        return (
+          logTime >= officeStartedAt.getTime() &&
+          logTime <= route.sentAt.getTime()
+        );
+      });
+
+      /*
+    |--------------------------------------------------------------------------
+    | EXPLICIT STATUS
+    |--------------------------------------------------------------------------
+    |
+    | If there is a status update during
+    | this office's handling period,
+    | use it — even if it is PENDING.
+    |
+    */
+
+      const latestStatusLog = statusLogsInThisOffice.at(-1);
+
+      const explicitStatus = getStatusFromLog(latestStatusLog?.description);
+
+      if (explicitStatus) {
+        lastKnownStatus = explicitStatus;
+      }
+
+      /*
+    |--------------------------------------------------------------------------
+    | NO STATUS UPDATE
+    |--------------------------------------------------------------------------
+    |
+    | If explicitStatus is undefined/null,
+    | lastKnownStatus stays unchanged.
+    |
+    */
+
+      let documentStatus = lastKnownStatus;
+
+      /*
+    |--------------------------------------------------------------------------
+    | CURRENT DESTINATION / LAST ROUTE
+    |--------------------------------------------------------------------------
+    |
+    | The final destination may have changed
+    | status after receiving the document,
+    | but has not routed it again yet.
+    |
+    */
+
+      const isLatestRoute = index === document.routes.length - 1;
+
+      const isCurrentDestination =
+        document.currentOfficeId === route.toOfficeId;
+
+      if (isLatestRoute && isCurrentDestination) {
+        const destinationStartedAt = route.receivedAt ?? route.sentAt;
+
+        const destinationStatusLogs = document.logs.filter((log) => {
+          const status = getStatusFromLog(log.description);
+
+          if (!status) {
+            return false;
+          }
+
+          return log.createdAt.getTime() >= destinationStartedAt.getTime();
+        });
+
+        const latestDestinationLog = destinationStatusLogs.at(-1);
+
+        const destinationStatus = getStatusFromLog(
+          latestDestinationLog?.description,
+        );
+
+        /*
+         * Again:
+         * only replace when there was
+         * an explicit status update.
+         */
+        if (destinationStatus) {
+          documentStatus = destinationStatus;
+
+          lastKnownStatus = destinationStatus;
+        }
+      }
+
+      return {
+        id: route.id,
+
+        fromOffice: route.fromOffice,
+
+        toOffice: route.toOffice,
+
+        routeStatus: route.status,
+
+        documentStatus,
+
+        remarks: route.remarks,
+
+        sentAt: route.sentAt,
+
+        receivedAt: route.receivedAt,
+
+        completedAt: route.completedAt,
+
+        sentBy: route.sentBy,
+
+        receivedBy: route.receivedBy,
+      };
+    });
+
     return {
       trackingNumber: document.trackingNumber,
       title: document.title,
@@ -1903,18 +2275,7 @@ export class DocumentsService {
       documentType: document.documentType,
       currentStatus: document.currentStatus,
       currentOffice: document.currentOffice,
-      routes: document.routes.map((route) => ({
-        id: route.id,
-        fromOffice: route.fromOffice,
-        toOffice: route.toOffice,
-        status: route.status,
-        remarks: route.remarks,
-        sentAt: route.sentAt,
-        receivedAt: route.receivedAt,
-        completedAt: route.completedAt,
-        sentBy: route.sentBy,
-        receivedBy: route.receivedBy,
-      })),
+      routes,
     };
   }
 
@@ -3826,5 +4187,445 @@ export class DocumentsService {
     });
 
     return action;
+  }
+
+  async updateAction(
+    documentId: string,
+    actionId: string,
+    dto: UpdateDocumentActionDto,
+    file: Express.Multer.File | undefined,
+    currentUser: AuthenticatedUser,
+  ) {
+    /*
+  |--------------------------------------------------------------------------
+  | Find Action
+  |--------------------------------------------------------------------------
+  */
+
+    const action = await this.prisma.documentAction.findFirst({
+      where: {
+        id: actionId,
+        documentId,
+      },
+
+      include: {
+        document: {
+          include: {
+            currentStatus: true,
+          },
+        },
+      },
+    });
+
+    if (!action) {
+      throw new NotFoundException('Document action not found');
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Permission
+  |--------------------------------------------------------------------------
+  */
+
+    const isSuperAdmin = currentUser.roles.includes('SUPER_ADMIN');
+
+    const isOwner = action.userId === currentUser.userId;
+
+    if (!isSuperAdmin && !isOwner) {
+      throw new ForbiddenException('You cannot update this action');
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Completed Document
+  |--------------------------------------------------------------------------
+  */
+
+    if (action.document.currentStatus?.name === 'COMPLETED') {
+      throw new BadRequestException(
+        'Cannot modify an action of a completed document',
+      );
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Validate New Content
+  |--------------------------------------------------------------------------
+  */
+
+    const comment = dto.comment?.trim() || null;
+
+    /*
+     * Existing attachment counts as content.
+     */
+    const hasExistingFile = Boolean(action.filePath);
+
+    if (!comment && !file && !hasExistingFile) {
+      throw new BadRequestException('Please provide a comment or attachment');
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Keep old file path before updating
+  |--------------------------------------------------------------------------
+  */
+
+    const oldFilePath = action.filePath;
+
+    /*
+  |--------------------------------------------------------------------------
+  | Update Action
+  |--------------------------------------------------------------------------
+  */
+
+    const updatedAction = await this.prisma.documentAction.update({
+      where: {
+        id: action.id,
+      },
+
+      data: {
+        comment,
+
+        ...(file
+          ? {
+              fileName: file.originalname,
+
+              filePath: `/uploads/document-actions/${file.filename}`,
+
+              fileType: file.mimetype,
+            }
+          : {}),
+      },
+
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+          },
+        },
+
+        office: {
+          select: {
+            id: true,
+            officeCode: true,
+            officeName: true,
+          },
+        },
+      },
+    });
+
+    /*
+  |--------------------------------------------------------------------------
+  | Delete Previous Attachment
+  |--------------------------------------------------------------------------
+  |
+  | Only after DB update succeeds.
+  |
+  */
+
+    if (file && oldFilePath) {
+      const oldFilename = path.basename(oldFilePath);
+
+      const absolutePath = path.join(
+        process.cwd(),
+        'uploads',
+        'document-actions',
+        oldFilename,
+      );
+
+      await unlink(absolutePath).catch(() => undefined);
+    }
+
+    return updatedAction;
+  }
+
+  async deleteAction(
+    documentId: string,
+    actionId: string,
+    currentUser: AuthenticatedUser,
+  ) {
+    /*
+  |--------------------------------------------------------------------------
+  | Find Action
+  |--------------------------------------------------------------------------
+  */
+
+    const action = await this.prisma.documentAction.findFirst({
+      where: {
+        id: actionId,
+        documentId,
+      },
+
+      include: {
+        document: {
+          include: {
+            currentStatus: true,
+          },
+        },
+      },
+    });
+
+    if (!action) {
+      throw new NotFoundException('Document action not found');
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Permission
+  |--------------------------------------------------------------------------
+  */
+
+    const isSuperAdmin = currentUser.roles.includes('SUPER_ADMIN');
+
+    const isOwner = action.userId === currentUser.userId;
+
+    if (!isSuperAdmin && !isOwner) {
+      throw new ForbiddenException('You cannot delete this action');
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Completed Document
+  |--------------------------------------------------------------------------
+  */
+
+    if (action.document.currentStatus?.name === 'COMPLETED') {
+      throw new BadRequestException(
+        'Cannot delete an action from a completed document',
+      );
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | Delete DB Record First
+  |--------------------------------------------------------------------------
+  */
+
+    await this.prisma.documentAction.delete({
+      where: {
+        id: action.id,
+      },
+    });
+
+    /*
+  |--------------------------------------------------------------------------
+  | Delete Physical File
+  |--------------------------------------------------------------------------
+  */
+
+    if (action.filePath) {
+      const filename = path.basename(action.filePath);
+
+      const absolutePath = path.join(
+        process.cwd(),
+        'uploads',
+        'document-actions',
+        filename,
+      );
+
+      await unlink(absolutePath).catch(() => undefined);
+    }
+
+    return {
+      success: true,
+
+      message: 'Document action deleted successfully',
+
+      actionId: action.id,
+    };
+  }
+
+  async getRoutingSlipHistory(
+    documentId: string,
+    currentUser: AuthenticatedUser,
+  ) {
+    const document = await this.prisma.document.findUnique({
+      where: {
+        id: documentId,
+      },
+
+      include: {
+        routes: {
+          orderBy: {
+            sentAt: 'asc',
+          },
+
+          include: {
+            fromOffice: {
+              select: {
+                id: true,
+                officeCode: true,
+                officeName: true,
+              },
+            },
+
+            toOffice: {
+              select: {
+                id: true,
+                officeCode: true,
+                officeName: true,
+              },
+            },
+          },
+        },
+
+        actions: {
+          orderBy: {
+            createdAt: 'asc',
+          },
+
+          select: {
+            id: true,
+            officeId: true,
+            comment: true,
+            fileName: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Document not found');
+    }
+
+    const isSuperAdmin = currentUser.roles.includes('SUPER_ADMIN');
+
+    const hasOfficeAccess = currentUser.officeIds.some((officeId) =>
+      document.routes.some(
+        (route) =>
+          route.fromOfficeId === officeId || route.toOfficeId === officeId,
+      ),
+    );
+
+    if (
+      !isSuperAdmin &&
+      !hasOfficeAccess &&
+      !currentUser.officeIds.includes(document.currentOfficeId)
+    ) {
+      throw new ForbiddenException('You cannot access this routing slip');
+    }
+
+    const routingHistory = document.routes.map((route, routeIndex) => {
+      /*
+        |--------------------------------------------------------------------------
+        | FIND WHEN THE "FROM OFFICE" RECEIVED THE DOCUMENT
+        |--------------------------------------------------------------------------
+        |
+        | For example:
+        |
+        | Records -> ORD
+        |
+        | We need Records' received date here,
+        | NOT ORD's received date.
+        |
+        */
+
+      const previousRoutes = document.routes.slice(0, routeIndex);
+
+      const previousIncoming = [...previousRoutes]
+        .reverse()
+        .find(
+          (previousRoute) =>
+            previousRoute.toOfficeId === route.fromOfficeId &&
+            previousRoute.receivedAt,
+        );
+
+      /*
+       * First/origin office has no
+       * previous incoming route.
+       *
+       * document.createdAt acts as
+       * its initial received/recorded time.
+       */
+      const dateReceived =
+        previousIncoming?.receivedAt ??
+        (routeIndex === 0 ? document.createdAt : null);
+
+      /*
+        |--------------------------------------------------------------------------
+        | ACTIONS TAKEN WHILE DOCUMENT WAS IN FROM OFFICE
+        |--------------------------------------------------------------------------
+        */
+
+      const officeActions = document.actions.filter((action) => {
+        if (action.officeId !== route.fromOfficeId) {
+          return false;
+        }
+
+        /*
+         * Action must happen before
+         * this office released/routed
+         * the document.
+         */
+        if (action.createdAt > route.sentAt) {
+          return false;
+        }
+
+        /*
+         * If we know when the office
+         * received it, exclude actions
+         * from an earlier visit.
+         */
+        if (dateReceived && action.createdAt < dateReceived) {
+          return false;
+        }
+
+        return true;
+      });
+
+      return {
+        id: route.id,
+
+        fromOffice: {
+          id: route.fromOffice.id,
+
+          officeCode: route.fromOffice.officeCode,
+
+          officeName: route.fromOffice.officeName,
+        },
+
+        dateReceived,
+
+        toOffice: {
+          id: route.toOffice.id,
+
+          officeCode: route.toOffice.officeCode,
+
+          officeName: route.toOffice.officeName,
+        },
+
+        /*
+         * sentAt = when From Office
+         * released/routed the document.
+         */
+        dateReleased: route.sentAt,
+
+        routeRemarks: route.remarks ?? null,
+
+        status: route.status,
+
+        actions: officeActions.map((action) => ({
+          id: action.id,
+
+          comment: action.comment,
+
+          fileName: action.fileName,
+
+          createdAt: action.createdAt,
+        })),
+      };
+    });
+
+    return {
+      documentId: document.id,
+
+      trackingNumber: document.trackingNumber,
+
+      routingHistory,
+    };
   }
 }

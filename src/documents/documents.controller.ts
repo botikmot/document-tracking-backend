@@ -26,6 +26,7 @@ import { RouteDocumentDto } from './dto/route-document.dto';
 import { ReturnDocumentDto } from './dto/return-document.dto';
 import { DecisionDocumentDto } from './dto/decision-document.dto';
 import { CreateDocumentActionDto } from './dto/create-document-action.dto';
+import { UpdateDocumentActionDto } from './dto/update-document-action.dto';
 
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -592,6 +593,73 @@ export class DocumentsController {
     }
   }
 
+  @Patch(':id/actions/:actionId')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './uploads/document-actions',
+
+        filename: (req, file, callback) => {
+          const filename = `${Date.now()}-${file.originalname}`;
+
+          callback(null, filename);
+        },
+      }),
+    }),
+  )
+  async updateAction(
+    @Param('documentId')
+    documentId: string,
+
+    @Param('actionId')
+    actionId: string,
+
+    @Body()
+    dto: UpdateDocumentActionDto,
+
+    @UploadedFile()
+    file: Express.Multer.File | undefined,
+
+    @Req()
+    req: AuthenticatedRequest,
+  ) {
+    try {
+      return await this.documentsService.updateAction(
+        documentId,
+        actionId,
+        dto,
+        file,
+        req.user,
+      );
+    } catch (error) {
+      /*
+    |--------------------------------------------------------------------------
+    | Remove newly-uploaded file if update fails
+    |--------------------------------------------------------------------------
+    */
+
+      if (file?.path) {
+        await unlink(file.path).catch(() => undefined);
+      }
+
+      throw error;
+    }
+  }
+
+  @Delete(':id/actions/:actionId')
+  async deleteAction(
+    @Param('documentId')
+    documentId: string,
+
+    @Param('actionId')
+    actionId: string,
+
+    @Req()
+    req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.deleteAction(documentId, actionId, req.user);
+  }
+
   /*
    |--------------------------------------------------------------------------
    | RETURN DOCUMENT
@@ -611,6 +679,17 @@ export class DocumentsController {
     req: AuthenticatedRequest,
   ) {
     return this.documentsService.returnDocument(id, dto, req.user);
+  }
+
+  @Get(':id/routing-slip-history')
+  getRoutingSlipHistory(
+    @Param('id')
+    documentId: string,
+
+    @Req()
+    req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.getRoutingSlipHistory(documentId, req.user);
   }
 
   /*
