@@ -23,10 +23,27 @@ export class ReportsService {
       responsibleOffice: true,
 
       /*
-       * Actions made by the selected
-       * reporting office during the
-       * requested report period.
-       */
+  |--------------------------------------------------------------------------
+  | STATUS HISTORY
+  |--------------------------------------------------------------------------
+  */
+
+      logs: {
+        where: {
+          action: 'STATUS_UPDATED',
+        },
+
+        select: {
+          id: true,
+          description: true,
+          createdAt: true,
+        },
+
+        orderBy: {
+          createdAt: 'asc',
+        },
+      },
+
       actions: {
         where: {
           ...(officeIds.length
@@ -59,21 +76,119 @@ export class ReportsService {
       include: typeof documentInclude;
     }>;
 
+    const TERMINAL_DOCUMENT_STATUSES = new Set([
+      'COMPLETED',
+      'END_TRANSACTION',
+    ]);
+
+    type DocumentSummaryMeta = {
+      receivedAt: Date | null;
+      completedAt: Date | null;
+      latestRemarks: string | null;
+    };
+
+    const getStatusFromLog = (description?: string | null) => {
+      if (!description) {
+        return null;
+      }
+
+      const prefix = 'Document marked as ';
+
+      if (!description.startsWith(prefix)) {
+        return null;
+      }
+
+      return description.replace(prefix, '').trim();
+    };
+
     const mapDocument = (
       doc: ReportDocument,
       officeStatus: string | null = null,
       routeStatus: string | null = null,
       routedToOffice: string | null = null,
       timeInOfficeMs: number = 0,
+      summaryMeta?: DocumentSummaryMeta,
     ) => {
+      /*
+  |--------------------------------------------------------------------------
+  | DOCUMENT RECEIVED DATE
+  |--------------------------------------------------------------------------
+  |
+  | This is the first official receipt/intake
+  | by a RECORDS office.
+  |
+  | If unavailable, keep createdAt as internal
+  | fallback for old documents.
+  |
+  */
+
+      const receivedAt = summaryMeta?.receivedAt ?? null;
+
+      const processingStartedAt = receivedAt ?? doc.createdAt;
+
+      /*
+  |--------------------------------------------------------------------------
+  | TOTAL PROCESSING TIME
+  |--------------------------------------------------------------------------
+  |
+  | START:
+  | Records Received Date
+  |
+  | END:
+  | Deadline
+  |
+  */
+
       const allottedTimeMs = doc.deadline
-        ? doc.deadline.getTime() - doc.createdAt.getTime()
+        ? Math.max(doc.deadline.getTime() - processingStartedAt.getTime(), 0)
         : null;
 
+      const isCompleted =
+        doc.currentStatus.name === 'COMPLETED' ||
+        doc.currentStatus.name === 'END_TRANSACTION';
+
+      /*
+|--------------------------------------------------------------------------
+| COMPLETION DATE
+|--------------------------------------------------------------------------
+|
+| Priority:
+|
+| 1. COMPLETED status timestamp
+| 2. END_TRANSACTION timestamp if document
+|    went directly to END_TRANSACTION
+|
+| Important:
+| If COMPLETED happened before END_TRANSACTION,
+| use COMPLETED because that is when actual
+| processing was completed.
+|
+*/
+
+      let completedAt: Date | null = null;
+
+      if (isCompleted) {
+        const completedLog = [...doc.logs].reverse().find((log) => {
+          return getStatusFromLog(log.description) === 'COMPLETED';
+        });
+
+        const endTransactionLog = [...doc.logs].reverse().find((log) => {
+          return getStatusFromLog(log.description) === 'END_TRANSACTION';
+        });
+
+        completedAt =
+          completedLog?.createdAt ?? endTransactionLog?.createdAt ?? null;
+      }
+      /*
+  |--------------------------------------------------------------------------
+  | TERMINAL STATUS
+  |--------------------------------------------------------------------------
+  */
+
+      const isTerminal = TERMINAL_DOCUMENT_STATUSES.has(doc.currentStatus.name);
+
       const isOverdue =
-        !!doc.deadline &&
-        doc.currentStatus.name !== 'COMPLETED' &&
-        new Date().getTime() > doc.deadline.getTime();
+        !!doc.deadline && !isTerminal && Date.now() > doc.deadline.getTime();
 
       const responsibleParty =
         doc.responsibleOffice?.officeName ??
@@ -89,10 +204,13 @@ export class ReportsService {
       return {
         id: doc.id,
         trackingNumber: doc.trackingNumber,
+
         title: doc.title,
+
         documentType: doc.documentType.name,
 
         status: doc.currentStatus.name,
+
         officeStatus,
         routeStatus,
         routedToOffice,
@@ -106,15 +224,31 @@ export class ReportsService {
         responsibleParty,
 
         classification: doc.classification,
+
         priority: doc.priority,
 
         createdAt: doc.createdAt,
+
+        /*
+  |--------------------------------------------------------------------------
+  | RECEIVED DATE
+  |--------------------------------------------------------------------------
+  |
+  | Business rule:
+  | creation in eDATS = official receipt
+  | of the document.
+  |
+  */
+
+        receivedAt: doc.createdAt,
+
         deadline: doc.deadline,
 
-        // NEW
         allottedTimeMs,
         timeInOfficeMs,
         isOverdue,
+        completedAt,
+
         deadlineStatus: !doc.deadline
           ? 'NO_DEADLINE'
           : isOverdue
@@ -122,6 +256,7 @@ export class ReportsService {
             : officeStatus === 'PENDING'
               ? 'AWAITING_RECEIPT'
               : 'ON_TIME',
+
         acted,
         actionCount,
         lastActionAt,
@@ -427,6 +562,271 @@ export class ReportsService {
 
     const reportDocumentIds = totalDocumentsData.map((doc) => doc.id);
 
+    const [documentHistoryRoutes, documentStatusLogs, documentActionRemarks] =
+      await Promise.all([
+        /*
+  |--------------------------------------------------------------------------
+  | COMPLETE ROUTING HISTORY
+  |--------------------------------------------------------------------------
+  |
+  | Needed to determine:
+  | - first receipt by Records
+  | - latest route remarks
+  |
+  */
+
+        this.prisma.documentRoute.findMany({
+          where: {
+            documentId: {
+              in: reportDocumentIds,
+            },
+          },
+
+          select: {
+            documentId: true,
+
+            sentAt: true,
+            receivedAt: true,
+            completedAt: true,
+
+            remarks: true,
+
+            fromOffice: {
+              select: {
+                id: true,
+                officeCode: true,
+                officeName: true,
+                category: true,
+              },
+            },
+
+            toOffice: {
+              select: {
+                id: true,
+                officeCode: true,
+                officeName: true,
+                category: true,
+              },
+            },
+          },
+
+          orderBy: {
+            sentAt: 'asc',
+          },
+        }),
+
+        /*
+  |--------------------------------------------------------------------------
+  | DOCUMENT STATUS HISTORY
+  |--------------------------------------------------------------------------
+  |
+  | Needed to determine the exact date
+  | the document became COMPLETED or
+  | END_TRANSACTION.
+  |
+  */
+
+        this.prisma.documentLog.findMany({
+          where: {
+            documentId: {
+              in: reportDocumentIds,
+            },
+
+            action: 'STATUS_UPDATED',
+          },
+
+          select: {
+            documentId: true,
+            description: true,
+            createdAt: true,
+          },
+
+          orderBy: {
+            createdAt: 'asc',
+          },
+        }),
+
+        /*
+  |--------------------------------------------------------------------------
+  | ALL DOCUMENT ACTION REMARKS
+  |--------------------------------------------------------------------------
+  |
+  | Separate from report actions because
+  | the report's current `actions` relation
+  | is intentionally filtered by office/date.
+  |
+  */
+
+        this.prisma.documentAction.findMany({
+          where: {
+            documentId: {
+              in: reportDocumentIds,
+            },
+          },
+
+          select: {
+            documentId: true,
+            comment: true,
+            createdAt: true,
+          },
+
+          orderBy: {
+            createdAt: 'asc',
+          },
+        }),
+      ]);
+
+    const documentSummaryMetaById = new Map<string, DocumentSummaryMeta>();
+
+    for (const doc of totalDocumentsData) {
+      const routes = documentHistoryRoutes.filter(
+        (route) => route.documentId === doc.id,
+      );
+
+      /*
+  |--------------------------------------------------------------------------
+  | RECEIVED DATE
+  |--------------------------------------------------------------------------
+  |
+  | Priority:
+  |
+  | 1. Actual route received by any Records office
+  | 2. If Records was the originating office,
+  |    createdAt represents Records intake
+  | 3. Local/unrouted document currently in Records
+  |
+  */
+
+      const receivedByRecordsRoute = routes.find(
+        (route) => route.toOffice.category === 'RECORDS' && route.receivedAt,
+      );
+
+      let receivedAt = receivedByRecordsRoute?.receivedAt ?? null;
+
+      /*
+       * Most externally received documents
+       * are encoded/created directly by Records.
+       *
+       * In this case there is no incoming route
+       * TO Records. The first route instead
+       * originates FROM Records.
+       */
+      if (!receivedAt) {
+        const originatedFromRecords = routes.some(
+          (route) => route.fromOffice.category === 'RECORDS',
+        );
+
+        if (originatedFromRecords) {
+          receivedAt = doc.createdAt;
+        }
+      }
+
+      /*
+       * Document created in Records
+       * but never routed yet.
+       */
+      if (
+        !receivedAt &&
+        routes.length === 0 &&
+        doc.currentOffice.category === 'RECORDS'
+      ) {
+        receivedAt = doc.createdAt;
+      }
+
+      /*
+  |--------------------------------------------------------------------------
+  | COMPLETED DATE
+  |--------------------------------------------------------------------------
+  */
+
+      const logs = documentStatusLogs.filter(
+        (log) => log.documentId === doc.id,
+      );
+
+      let completedAt: Date | null = null;
+
+      if (TERMINAL_DOCUMENT_STATUSES.has(doc.currentStatus.name)) {
+        const terminalLogs = logs.filter((log) => {
+          const status = getStatusFromLog(log.description);
+
+          return status !== null && TERMINAL_DOCUMENT_STATUSES.has(status);
+        });
+
+        const latestTerminalLog = terminalLogs.at(-1);
+
+        completedAt = latestTerminalLog?.createdAt ?? null;
+
+        /*
+         * Legacy fallback:
+         *
+         * If older completed documents
+         * have no STATUS_UPDATED log,
+         * updatedAt is the best available
+         * timestamp.
+         */
+        if (!completedAt) {
+          completedAt = doc.updatedAt;
+        }
+      }
+
+      /*
+  |--------------------------------------------------------------------------
+  | LATEST REMARKS
+  |--------------------------------------------------------------------------
+  |
+  | Candidate sources:
+  |
+  | - routing remarks
+  | - document action comments
+  |
+  | Whichever was recorded latest wins.
+  |
+  */
+
+      const remarkCandidates: {
+        text: string;
+        createdAt: Date;
+      }[] = [];
+
+      for (const route of routes) {
+        const remarks = route.remarks?.trim();
+
+        if (remarks) {
+          remarkCandidates.push({
+            text: remarks,
+            createdAt: route.sentAt,
+          });
+        }
+      }
+
+      const actions = documentActionRemarks.filter(
+        (action) => action.documentId === doc.id,
+      );
+
+      for (const action of actions) {
+        const comment = action.comment?.trim();
+
+        if (comment) {
+          remarkCandidates.push({
+            text: comment,
+            createdAt: action.createdAt,
+          });
+        }
+      }
+
+      remarkCandidates.sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+      );
+
+      const latestRemarks = remarkCandidates[0]?.text ?? null;
+
+      documentSummaryMetaById.set(doc.id, {
+        receivedAt,
+        completedAt,
+        latestRemarks,
+      });
+    }
+
     const officeHandlingRoutes = await this.prisma.documentRoute.findMany({
       where: {
         documentId: {
@@ -716,6 +1116,8 @@ export class ReportsService {
         getRouteStatus(doc.id),
         getRoutedToOffice(doc.id),
         getTimeInOffice(doc.id),
+
+        documentSummaryMetaById.get(doc.id),
       ),
     );
 
