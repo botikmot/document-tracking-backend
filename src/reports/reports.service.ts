@@ -101,6 +101,21 @@ export class ReportsService {
       return description.replace(prefix, '').trim();
     };
 
+    const isDocumentOverdue = (
+      doc: ReportDocument,
+      referenceTime = Date.now(),
+    ) => {
+      if (!doc.deadline) {
+        return false;
+      }
+
+      if (TERMINAL_DOCUMENT_STATUSES.has(doc.currentStatus.name)) {
+        return false;
+      }
+
+      return referenceTime > doc.deadline.getTime();
+    };
+
     const mapDocument = (
       doc: ReportDocument,
       officeStatus: string | null = null,
@@ -185,10 +200,11 @@ export class ReportsService {
   |--------------------------------------------------------------------------
   */
 
-      const isTerminal = TERMINAL_DOCUMENT_STATUSES.has(doc.currentStatus.name);
+      //const isTerminal = TERMINAL_DOCUMENT_STATUSES.has(doc.currentStatus.name);
 
-      const isOverdue =
-        !!doc.deadline && !isTerminal && Date.now() > doc.deadline.getTime();
+      /* const isOverdue =
+        !!doc.deadline && !isTerminal && Date.now() > doc.deadline.getTime(); */
+      const isOverdue = isDocumentOverdue(doc);
 
       const responsibleParty =
         doc.responsibleOffice?.officeName ??
@@ -260,6 +276,7 @@ export class ReportsService {
         acted,
         actionCount,
         lastActionAt,
+        latestRemarks: summaryMeta?.latestRemarks ?? null,
       };
     };
 
@@ -1168,24 +1185,14 @@ export class ReportsService {
 |
 */
 
-    const completedDocumentsData = totalDocumentsData.filter(
-      (doc) =>
-        officeIds.includes(doc.currentOfficeId) &&
-        doc.currentStatus.name === 'COMPLETED',
+    const completedDocumentsData = totalDocumentsData.filter((doc) =>
+      TERMINAL_DOCUMENT_STATUSES.has(doc.currentStatus.name),
     );
 
-    const now = new Date();
+    //const now = new Date();
 
-    const overdueDocumentsData = totalDocumentsData.filter(
-      (doc) =>
-        officeIds.includes(doc.currentOfficeId) &&
-        doc.deadline !== null &&
-        doc.deadline.getTime() < now.getTime() &&
-        /*
-         * Completed documents can
-         * never be overdue anymore.
-         */
-        doc.currentStatus.name !== 'COMPLETED',
+    const overdueDocumentsData = totalDocumentsData.filter((doc) =>
+      isDocumentOverdue(doc, now1),
     );
 
     const pendingDocumentsList = pendingDocumentsData.map((doc) =>

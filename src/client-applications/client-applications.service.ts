@@ -358,9 +358,65 @@ export class ClientApplicationsService {
       },
 
       include: {
+        serviceType: {
+          include: {
+            requirements: {
+              where: {
+                isActive: true,
+              },
+
+              orderBy: {
+                createdAt: 'asc',
+              },
+            },
+          },
+        },
+
         attachments: {
+          include: {
+            requirement: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+              },
+            },
+          },
+
           orderBy: {
-            createdAt: 'desc',
+            createdAt: 'asc',
+          },
+        },
+
+        document: {
+          select: {
+            id: true,
+            trackingNumber: true,
+            title: true,
+            createdAt: true,
+
+            currentStatus: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+
+            currentOffice: {
+              select: {
+                id: true,
+                officeCode: true,
+                officeName: true,
+              },
+            },
+
+            responsibleOffice: {
+              select: {
+                id: true,
+                officeCode: true,
+                officeName: true,
+              },
+            },
           },
         },
       },
