@@ -1,5 +1,20 @@
-import { IsOptional, IsString, IsDate, IsArray, IsUUID } from 'class-validator';
+import {
+  IsArray,
+  IsDate,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
+
 import { Type } from 'class-transformer';
+
+import {
+  DocumentMonitoringCategory,
+  DocumentSourceClass,
+  InternalSourceScope,
+} from '@prisma/client';
+
 export class UpdateDocumentDto {
   @IsOptional()
   @IsString()
@@ -15,7 +30,7 @@ export class UpdateDocumentDto {
   deadline?: Date;
 
   @IsOptional()
-  @IsString()
+  @IsUUID()
   documentTypeId?: string;
 
   @IsOptional()
@@ -42,12 +57,32 @@ export class UpdateDocumentDto {
   @IsString()
   confidentialityLevel?: string;
 
+  // =====================================================
+  // DOCUMENT SOURCE CLASSIFICATION
+  // =====================================================
+
+  @IsOptional()
+  @IsEnum(DocumentSourceClass)
+  sourceClass?: DocumentSourceClass;
+
+  @IsOptional()
+  @IsEnum(InternalSourceScope)
+  internalSourceScope?: InternalSourceScope;
+
+  @IsOptional()
+  @IsEnum(DocumentMonitoringCategory)
+  monitoringCategory?: DocumentMonitoringCategory;
+
+  // =====================================================
+  // SENDER
+  // =====================================================
+
   @IsOptional()
   @IsString()
   senderType?: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID()
   senderOfficeId?: string;
 
   @IsOptional()

@@ -1,16 +1,25 @@
 import {
+  IsArray,
   IsDateString,
+  IsEnum,
   IsOptional,
   IsString,
-  IsArray,
-  ValidateNested,
   IsUUID,
+  ValidateNested,
 } from 'class-validator';
+
 import { Type } from 'class-transformer';
+
+import {
+  DocumentMonitoringCategory,
+  DocumentSourceClass,
+  InternalSourceScope,
+} from '@prisma/client';
+
 import { CreateDocumentAttachmentDto } from './create-document-attachment.dto';
 
 export class CreateDocumentDto {
-  @IsString()
+  @IsUUID()
   documentTypeId!: string;
 
   @IsString()
@@ -32,6 +41,7 @@ export class CreateDocumentDto {
   @IsString()
   confidentialityLevel?: string;
 
+  @IsOptional()
   @IsString()
   classification?: string;
 
@@ -39,6 +49,7 @@ export class CreateDocumentDto {
   @IsDateString()
   deadline?: string;
 
+  @IsOptional()
   @IsString()
   addressee?: string;
 
@@ -50,12 +61,32 @@ export class CreateDocumentDto {
   @IsString()
   responsiblePerson?: string;
 
+  // =====================================================
+  // DOCUMENT SOURCE CLASSIFICATION
+  // =====================================================
+
+  @IsOptional()
+  @IsEnum(DocumentSourceClass)
+  sourceClass?: DocumentSourceClass;
+
+  @IsOptional()
+  @IsEnum(InternalSourceScope)
+  internalSourceScope?: InternalSourceScope;
+
+  @IsOptional()
+  @IsEnum(DocumentMonitoringCategory)
+  monitoringCategory?: DocumentMonitoringCategory;
+
+  // =====================================================
+  // SENDER
+  // =====================================================
+
   @IsOptional()
   @IsString()
   senderType?: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID()
   senderOfficeId?: string;
 
   @IsOptional()
@@ -67,12 +98,16 @@ export class CreateDocumentDto {
   senderOrganization?: string;
 
   @IsOptional()
+  @IsString()
+  senderContact?: string;
+
+  @IsOptional()
   @IsUUID()
   currentOfficeId?: string;
 
-  @IsOptional()
-  @IsString()
-  senderContact?: string;
+  // =====================================================
+  // ATTACHMENTS
+  // =====================================================
 
   @IsOptional()
   @IsArray()

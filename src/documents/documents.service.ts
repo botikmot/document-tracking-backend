@@ -18,7 +18,14 @@ import { PublicUpdateDocumentStatusDto } from './dto/public-update-document-stat
 import { CreateDocumentActionDto } from './dto/create-document-action.dto';
 import { UpdateDocumentActionDto } from './dto/update-document-action.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
-import { Prisma } from '@prisma/client';
+import {
+  Prisma,
+  DocumentMonitoringCategory,
+  DocumentRoutingProfile,
+  DocumentSourceClass,
+  InternalSourceScope,
+} from '@prisma/client';
+
 import * as path from 'node:path';
 import { unlink } from 'node:fs/promises';
 
@@ -67,6 +74,99 @@ export class DocumentsService {
     private prisma: PrismaService,
     private readonly notificationsGateway: NotificationsGateway,
   ) {}
+
+  private normalizeDocumentClassification(input: {
+    sourceClass?: DocumentSourceClass | null;
+    internalSourceScope?: InternalSourceScope | null;
+    monitoringCategory?: DocumentMonitoringCategory | null;
+  }) {
+    const monitoringCategory =
+      input.monitoringCategory ?? DocumentMonitoringCategory.GENERAL;
+
+    const isSpecialExternalDocument =
+      monitoringCategory === DocumentMonitoringCategory.PERMIT ||
+      monitoringCategory === DocumentMonitoringCategory.SURVEY_RETURN;
+
+    /*
+     * PERMIT / SURVEY RETURN
+     *
+     * Always EXTERNAL
+     * No internal source scope
+     * Does not use the normal RED → ARD flow
+     */
+    if (isSpecialExternalDocument) {
+      if (
+        input.sourceClass &&
+        input.sourceClass !== DocumentSourceClass.EXTERNAL
+      ) {
+        throw new BadRequestException(
+          'Permits and Survey Returns must be classified as EXTERNAL',
+        );
+      }
+
+      return {
+        sourceClass: DocumentSourceClass.EXTERNAL,
+        internalSourceScope: null,
+        monitoringCategory,
+        routingProfile: DocumentRoutingProfile.DIRECT_TO_ACTION_OFFICE,
+      };
+    }
+
+    /*
+     * INTERNAL
+     */
+    if (input.sourceClass === DocumentSourceClass.INTERNAL) {
+      if (!input.internalSourceScope) {
+        throw new BadRequestException(
+          'Internal source scope is required for INTERNAL documents',
+        );
+      }
+
+      if (monitoringCategory !== DocumentMonitoringCategory.GENERAL) {
+        throw new BadRequestException(
+          'INTERNAL documents must use GENERAL monitoring category',
+        );
+      }
+
+      return {
+        sourceClass: DocumentSourceClass.INTERNAL,
+        internalSourceScope: input.internalSourceScope,
+        monitoringCategory: DocumentMonitoringCategory.GENERAL,
+        routingProfile: DocumentRoutingProfile.STANDARD,
+      };
+    }
+
+    /*
+     * EXTERNAL GENERAL
+     */
+    if (input.sourceClass === DocumentSourceClass.EXTERNAL) {
+      return {
+        sourceClass: DocumentSourceClass.EXTERNAL,
+        internalSourceScope: null,
+        monitoringCategory,
+        routingProfile: DocumentRoutingProfile.STANDARD,
+      };
+    }
+
+    /*
+     * Transitional support for existing documents.
+     *
+     * sourceClass is still nullable while old records
+     * have not yet been classified.
+     */
+    if (input.internalSourceScope) {
+      throw new BadRequestException(
+        'Internal source scope requires INTERNAL source classification',
+      );
+    }
+
+    return {
+      sourceClass: null,
+      internalSourceScope: null,
+      monitoringCategory,
+      routingProfile: DocumentRoutingProfile.STANDARD,
+    };
+  }
 
   private async buildDocumentWhere(
     currentUser: AuthenticatedUser,
@@ -267,6 +367,28 @@ export class DocumentsService {
       }
     }
 
+    const classificationData = this.normalizeDocumentClassification({
+      sourceClass: dto.sourceClass,
+      internalSourceScope: dto.internalSourceScope,
+      monitoringCategory: dto.monitoringCategory,
+    });
+
+    if (dto.senderOfficeId) {
+      const senderOffice = await db.office.findUnique({
+        where: {
+          id: dto.senderOfficeId,
+        },
+
+        select: {
+          id: true,
+        },
+      });
+
+      if (!senderOffice) {
+        throw new BadRequestException('Sender office not found');
+      }
+    }
+
     /*
      |--------------------------------------------------------------------------
      | Create Document
@@ -279,6 +401,10 @@ export class DocumentsService {
         documentTypeId: dto.documentTypeId,
         currentStatusId: draftStatus.id,
         currentOfficeId: officeUser.officeId,
+        sourceClass: classificationData.sourceClass,
+        internalSourceScope: classificationData.internalSourceScope,
+        monitoringCategory: classificationData.monitoringCategory,
+        routingProfile: classificationData.routingProfile,
         title: dto.title,
         description: dto.description,
         referenceNumber: dto.referenceNumber,
@@ -292,7 +418,7 @@ export class DocumentsService {
         createdById: currentUser.userId,
         senderType: dto.senderType,
         senderOfficeId:
-          dto.senderType === 'OFFICE' ? officeUser.officeId : null,
+          dto.senderType === 'OFFICE' ? dto.senderOfficeId || null : null,
         senderName: dto.senderType === 'CLIENT' ? dto.senderName : null,
         senderOrganization:
           dto.senderType === 'COMPANY' || dto.senderType === 'AGENCY'
@@ -633,10 +759,86 @@ export class DocumentsService {
 
     const {
       attachments,
+
       responsibleOfficeId,
       responsiblePerson,
+
+      sourceClass,
+      internalSourceScope,
+      monitoringCategory,
+
+      senderOfficeId,
+      senderType,
+      senderName,
+      senderOrganization,
+      senderContact,
+
       ...documentData
     } = dto;
+
+    const effectiveMonitoringCategory =
+      monitoringCategory ?? document.monitoringCategory;
+
+    const isSpecialExternalDocument =
+      effectiveMonitoringCategory === DocumentMonitoringCategory.PERMIT ||
+      effectiveMonitoringCategory === DocumentMonitoringCategory.SURVEY_RETURN;
+
+    const effectiveSourceClass =
+      sourceClass ??
+      (isSpecialExternalDocument
+        ? DocumentSourceClass.EXTERNAL
+        : document.sourceClass);
+
+    const effectiveInternalSourceScope =
+      effectiveSourceClass === DocumentSourceClass.EXTERNAL
+        ? null
+        : internalSourceScope !== undefined
+          ? internalSourceScope
+          : document.internalSourceScope;
+
+    const classificationData = this.normalizeDocumentClassification({
+      sourceClass: effectiveSourceClass,
+      internalSourceScope: effectiveInternalSourceScope,
+      monitoringCategory: effectiveMonitoringCategory,
+    });
+
+    const isInternal =
+      classificationData.sourceClass === DocumentSourceClass.INTERNAL;
+
+    const isLocalCaraga =
+      isInternal &&
+      classificationData.internalSourceScope ===
+        InternalSourceScope.LOCAL_CARAGA;
+
+    const finalSenderType = isInternal
+      ? 'OFFICE'
+      : (senderType ?? document.senderType);
+
+    let finalSenderOfficeId: string | null = null;
+
+    if (isLocalCaraga) {
+      finalSenderOfficeId = senderOfficeId ?? document.senderOfficeId;
+
+      if (!finalSenderOfficeId) {
+        throw new BadRequestException(
+          'Originating DENR office is required for Local Caraga documents',
+        );
+      }
+
+      const senderOffice = await this.prisma.office.findUnique({
+        where: {
+          id: finalSenderOfficeId,
+        },
+
+        select: {
+          id: true,
+        },
+      });
+
+      if (!senderOffice) {
+        throw new BadRequestException('Originating DENR office not found');
+      }
+    }
 
     /*
   |--------------------------------------------------------------------------
@@ -658,6 +860,33 @@ export class DocumentsService {
 
         data: {
           ...documentData,
+          sourceClass: classificationData.sourceClass,
+
+          internalSourceScope: classificationData.internalSourceScope,
+
+          monitoringCategory: classificationData.monitoringCategory,
+
+          routingProfile: classificationData.routingProfile,
+
+          // ==========================================
+          // SENDER
+          // ==========================================
+
+          senderType: finalSenderType,
+
+          senderOfficeId: finalSenderOfficeId,
+
+          ...(senderName !== undefined && {
+            senderName: senderName?.trim() || null,
+          }),
+
+          ...(senderOrganization !== undefined && {
+            senderOrganization: senderOrganization?.trim() || null,
+          }),
+
+          ...(senderContact !== undefined && {
+            senderContact: senderContact?.trim() || null,
+          }),
 
           /*
             |--------------------------------------------------------------------------

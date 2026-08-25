@@ -72,6 +72,28 @@ enum ClientApplicationKind {
   GENERAL_INQUIRY
 }
 
+enum DocumentSourceClass {
+  INTERNAL
+  EXTERNAL
+}
+
+enum InternalSourceScope {
+  LOCAL_CARAGA
+  OTHER_REGION
+  CENTRAL_OFFICE
+}
+
+enum DocumentMonitoringCategory {
+  GENERAL
+  PERMIT
+  SURVEY_RETURN
+}
+
+enum DocumentRoutingProfile {
+  STANDARD
+  DIRECT_TO_ACTION_OFFICE
+}
+
 model User {
   id           String  @id @default(uuid())
   employeeId   String? @unique
@@ -233,6 +255,18 @@ model Document {
   senderContact      String?
   addressee          String?
 
+  // ==============================
+  // DOCUMENT CLASSIFICATION
+  // ==============================
+
+  sourceClass DocumentSourceClass?
+
+  internalSourceScope InternalSourceScope?
+
+  monitoringCategory DocumentMonitoringCategory @default(GENERAL)
+
+  routingProfile DocumentRoutingProfile @default(STANDARD)
+
   title       String
   description String?
 
@@ -273,6 +307,11 @@ model Document {
   logs        DocumentLog[]
 
   @@index([responsibleOfficeId])
+  // NEW INDEXES
+  @@index([sourceClass])
+  @@index([internalSourceScope])
+  @@index([monitoringCategory])
+  @@index([routingProfile])
 }
 
 model DocumentAttachment {
