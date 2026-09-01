@@ -21,6 +21,7 @@ import { ClientsModule } from './clients/clients.module';
 import { ClientAuthModule } from './client-auth/client-auth.module';
 import { ClientApplicationsModule } from './client-applications/client-applications.module';
 import { ClientServiceTypesModule } from './client-service-types/client-service-types.module';
+import { TransactionsModule } from './transactions/transactions.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { ClientServiceTypesModule } from './client-service-types/client-service-
     ClientAuthModule,
     ClientApplicationsModule,
     ClientServiceTypesModule,
+    TransactionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
