@@ -13,6 +13,8 @@ import {
   DocumentMonitoringCategory,
   DocumentSourceClass,
   InternalSourceScope,
+  DocumentClassification,
+  DocumentPriority,
 } from '@prisma/client';
 
 export class UpdateDocumentDto {
@@ -38,12 +40,12 @@ export class UpdateDocumentDto {
   addressee?: string;
 
   @IsOptional()
-  @IsString()
-  classification?: string;
+  @IsEnum(DocumentClassification)
+  classification?: DocumentClassification;
 
   @IsOptional()
-  @IsString()
-  priority?: string;
+  @IsEnum(DocumentPriority)
+  priority?: DocumentPriority;
 
   @IsOptional()
   @IsUUID()

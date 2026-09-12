@@ -1,18 +1,21 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength, IsEnum } from 'class-validator';
+
+import { DocumentClassification, DocumentPriority } from '@prisma/client';
 
 export class AcceptClientApplicationDto {
   @IsString()
   documentTypeId!: string;
 
-  @IsString()
-  classification!: string;
+  @IsOptional()
+  @IsEnum(DocumentClassification)
+  classification?: DocumentClassification;
 
   @IsString()
   addressee!: string;
 
   @IsOptional()
-  @IsString()
-  priority?: string;
+  @IsEnum(DocumentPriority)
+  priority?: DocumentPriority;
 
   @IsOptional()
   @IsString()

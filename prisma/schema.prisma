@@ -94,6 +94,49 @@ enum DocumentRoutingProfile {
   DIRECT_TO_ACTION_OFFICE
 }
 
+enum DocumentPriority {
+  LOW
+  ROUTINE
+  URGENT
+  IMMEDIATE
+}
+
+enum DocumentClassification {
+  UNCLASSIFIED
+  SIMPLE
+  COMPLEX
+  HIGHLY_TECHNICAL
+}
+
+enum DocumentDelayReason {
+  AWAITING_DOCUMENTS
+  FOR_REVIEW_EVALUATION
+  FOR_SIGNATURE_APPROVAL
+  RETURNED_FOR_REVISION
+  EXTERNAL_PARTY_AGENCY
+  FIELD_VALIDATION_INSPECTION
+}
+
+enum DocumentActionType {
+  APPROPRIATE_ACTION
+  REVIEW_EVALUATION
+  INFORMATION_REFERENCE
+  COMPLIANCE
+  SIGNATURE_APPROVAL
+  REFER
+  REVIEW_RECOMMENDATION
+  COORDINATION
+  DRAFT_REPLY
+  RETURN_FOR_REVISION
+  REFER_TO_DIVISION
+  ASSIGN_TO_SECTION
+  PREPARE_REPLY_OUTPUT
+  INSPECTION_FIELD_ACTION
+  COMPLIANCE_SUBMISSION
+  CLOSE_FILE
+  RETURN_TO_DIVISION
+}
+
 model User {
   id           String  @id @default(uuid())
   employeeId   String? @unique
@@ -277,9 +320,13 @@ model Document {
   responsibleOfficeId String?
   responsiblePerson   String?
 
-  priority             String?
+  priority             DocumentPriority?
   confidentialityLevel String?
-  classification       String?
+  classification       DocumentClassification?
+
+  delayReason DocumentDelayReason?
+
+  receivedAt DateTime?
 
   deadline DateTime?
 
@@ -522,6 +569,8 @@ model DocumentAction {
   userId     String
   officeId   String
 
+  actionType DocumentActionType?
+
   comment String?
 
   fileName String?
@@ -537,6 +586,7 @@ model DocumentAction {
   @@index([documentId])
   @@index([userId])
   @@index([officeId])
+  @@index([actionType])
 }
 
 model Client {

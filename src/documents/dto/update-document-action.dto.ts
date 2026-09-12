@@ -1,9 +1,6 @@
-// dto/update-document-action.dto.ts
+import { PartialType } from '@nestjs/mapped-types';
+import { CreateDocumentActionDto } from './create-document-action.dto';
 
-import { IsOptional, IsString } from 'class-validator';
-
-export class UpdateDocumentActionDto {
-  @IsOptional()
-  @IsString()
-  comment?: string;
-}
+export class UpdateDocumentActionDto extends PartialType(
+  CreateDocumentActionDto,
+) {}

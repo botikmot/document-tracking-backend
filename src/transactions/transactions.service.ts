@@ -67,8 +67,11 @@ const TERMINAL_DOCUMENT_STATUSES = new Set(['COMPLETED', 'END_TRANSACTION']);
 
 const DEFAULT_ALLOWED_OFFICE_CODES = new Set([
   'ORD',
+  'ORED',
   'RO-ARD-ADMIN',
   'RO-ARD-TECH',
+  'RO-ARD',
+  'PENRO-ADN',
 ]);
 
 /*
@@ -602,6 +605,24 @@ export class TransactionsService {
 
     await this.assertCanViewTransactions(user);
 
+    const userOffice = await this.prisma.office.findFirst({
+      where: {
+        id: {
+          in: user.officeIds,
+        },
+      },
+      select: {
+        organizationUnit: {
+          select: {
+            type: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    const userOrganizationName = userOffice?.organizationUnit?.name;
+
     /*
     |--------------------------------------------------------------------------
     | REPORT PERIOD
@@ -616,10 +637,11 @@ export class TransactionsService {
     |--------------------------------------------------------------------------
     */
 
-    const regionalOffices = await this.prisma.office.findMany({
+    const denrOffices = await this.prisma.office.findMany({
       where: {
         organizationUnit: {
-          type: OrganizationType.REGIONAL,
+          //type: userOrganizationType, //OrganizationType.REGIONAL,
+          name: userOrganizationName,
         },
 
         ...(query.officeId
@@ -782,7 +804,7 @@ export class TransactionsService {
     |--------------------------------------------------------------------------
     */
 
-    const offices = regionalOffices.map((office) => {
+    const offices = denrOffices.map((office) => {
       /*
           |--------------------------------------------------------------------------
           | DOCUMENTS HANDLED BY THIS OFFICE
@@ -1056,6 +1078,26 @@ export class TransactionsService {
       );
     }
 
+    const userOffice = await this.prisma.office.findFirst({
+      where: {
+        id: {
+          in: user.officeIds,
+        },
+      },
+      select: {
+        organizationUnit: {
+          select: {
+            type: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    const userOrganizationName = userOffice?.organizationUnit?.name;
+
+    console.log('userOrganizationName:', userOrganizationName);
+
     const offices = await this.prisma.office.findMany({
       where: {
         id: {
@@ -1063,7 +1105,8 @@ export class TransactionsService {
         },
 
         organizationUnit: {
-          type: OrganizationType.REGIONAL,
+          //type: userOrganizationType, //OrganizationType.REGIONAL,
+          name: userOrganizationName,
         },
       },
 
@@ -1105,6 +1148,13 @@ export class TransactionsService {
       }
 
       /*
+       * PENRO / CENRO
+       */
+      if (officeCode.startsWith('PENRO') || officeCode.startsWith('CENRO')) {
+        return true;
+      }
+
+      /*
        * Assistant Regional Director
        * office-name fallback.
        *
@@ -1121,6 +1171,7 @@ export class TransactionsService {
       return false;
     });
 
+    console.log('authorized:', authorized);
     if (!authorized) {
       throw new ForbiddenException(
         'Transactions are available only to ORED and Assistant Regional Director offices.',
@@ -1349,6 +1400,23 @@ export class TransactionsService {
 
     await this.assertCanViewTransactions(user);
 
+    const userOffice = await this.prisma.office.findFirst({
+      where: {
+        id: {
+          in: user.officeIds,
+        },
+      },
+      select: {
+        organizationUnit: {
+          select: {
+            name: true,
+          },
+        },
+      },
+    });
+
+    const userOrganizationName = userOffice?.organizationUnit?.name;
+
     /*
   |--------------------------------------------------------------------------
   | VALIDATE OFFICE
@@ -1363,7 +1431,8 @@ export class TransactionsService {
         id: officeId,
 
         organizationUnit: {
-          type: OrganizationType.REGIONAL,
+          //type: OrganizationType.REGIONAL,
+          name: userOrganizationName,
         },
       },
 

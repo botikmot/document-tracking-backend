@@ -3145,7 +3145,7 @@ export class DocumentsService {
         where: {
           ...baseWhere,
           priority: {
-            in: ['HIGH', 'URGENT'],
+            in: ['IMMEDIATE', 'URGENT'],
           },
         },
       }),
@@ -4385,6 +4385,7 @@ export class DocumentsService {
         userId: currentUser.userId,
 
         officeId: document.currentOfficeId,
+        actionType: dto.actionType,
 
         comment,
 
@@ -4513,6 +4514,7 @@ export class DocumentsService {
       },
 
       data: {
+        actionType: dto.actionType,
         comment,
 
         ...(file
@@ -4671,12 +4673,47 @@ export class DocumentsService {
     documentId: string,
     currentUser: AuthenticatedUser,
   ) {
+    // ===========================================================================
+    // LOAD DOCUMENT
+    // ===========================================================================
+
     const document = await this.prisma.document.findUnique({
       where: {
         id: documentId,
       },
 
       include: {
+        currentStatus: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+
+        currentOffice: {
+          select: {
+            id: true,
+            officeCode: true,
+            officeName: true,
+          },
+        },
+
+        senderOffice: {
+          select: {
+            id: true,
+            officeCode: true,
+            officeName: true,
+          },
+        },
+
+        responsibleOffice: {
+          select: {
+            id: true,
+            officeCode: true,
+            officeName: true,
+          },
+        },
+
         routes: {
           orderBy: {
             sentAt: 'asc',
@@ -4709,9 +4746,29 @@ export class DocumentsService {
           select: {
             id: true,
             officeId: true,
+            actionType: true,
             comment: true,
             fileName: true,
+            filePath: true,
+            fileType: true,
             createdAt: true,
+
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                employeeId: true,
+              },
+            },
+
+            office: {
+              select: {
+                id: true,
+                officeCode: true,
+                officeName: true,
+              },
+            },
           },
         },
       },
@@ -4720,6 +4777,10 @@ export class DocumentsService {
     if (!document) {
       throw new NotFoundException('Document not found');
     }
+
+    // ===========================================================================
+    // ACCESS VALIDATION
+    // ===========================================================================
 
     const isSuperAdmin = currentUser.roles.includes('SUPER_ADMIN');
 
@@ -4738,20 +4799,192 @@ export class DocumentsService {
       throw new ForbiddenException('You cannot access this routing slip');
     }
 
+    // ===========================================================================
+    // HELPERS
+    // ===========================================================================
+
+    const getUserFullName = (user: { firstName: string; lastName: string }) => {
+      return `${user.firstName} ${user.lastName}`.trim();
+    };
+
+    /**
+     * Determines which Routing Slip section an office belongs to.
+     *
+     * NOTE:
+     * This is currently based on officeCode.
+     * Adjust this once the actual office codes are confirmed.
+     */
+    const getInstructionSection = (
+      officeCode: string,
+    ): 'RED' | 'ARD' | 'DIVISION' => {
+      const code = officeCode.toUpperCase().trim();
+
+      // Regional Executive / Regional Director
+      if (
+        code === 'ORD' ||
+        code === 'ORED' ||
+        code === 'RED' ||
+        code === 'RD' ||
+        code.includes('REGIONAL DIRECTOR')
+      ) {
+        return 'RED';
+      }
+
+      // Assistant Regional Director
+      if (
+        code.startsWith('ARD') ||
+        code.startsWith('RO-ARD') ||
+        code.includes('ASSISTANT REGIONAL DIRECTOR')
+      ) {
+        return 'ARD';
+      }
+
+      // Other offices are temporarily treated as Division/Section
+      return 'DIVISION';
+    };
+
+    /**
+     * Converts a Prisma action record into a frontend-friendly object.
+     */
+    const mapAction = (action: (typeof document.actions)[number]) => ({
+      id: action.id,
+
+      actionType: action.actionType,
+
+      comment: action.comment,
+
+      fileName: action.fileName,
+
+      filePath: action.filePath,
+
+      fileType: action.fileType,
+
+      createdAt: action.createdAt,
+
+      user: {
+        id: action.user.id,
+        employeeId: action.user.employeeId,
+        name: getUserFullName(action.user),
+      },
+
+      office: {
+        id: action.office.id,
+        officeCode: action.office.officeCode,
+        officeName: action.office.officeName,
+      },
+    });
+
+    // ===========================================================================
+    // DOCUMENT AGE
+    // ===========================================================================
+
+    const now = new Date();
+
+    const totalAgeStart = document.createdAt;
+
+    const totalAgeMs = now.getTime() - totalAgeStart.getTime();
+
+    const totalAgeDays = Math.max(
+      0,
+      Math.floor(totalAgeMs / (1000 * 60 * 60 * 24)),
+    );
+
+    /**
+     * Find when the current office received the document.
+     *
+     * If no matching incoming route is found, fallback to document.createdAt.
+     */
+    const currentOfficeIncomingRoute = [...document.routes]
+      .reverse()
+      .find(
+        (route) =>
+          route.toOfficeId === document.currentOfficeId && route.receivedAt,
+      );
+
+    const currentOfficeReceivedAt =
+      currentOfficeIncomingRoute?.receivedAt ?? document.createdAt;
+
+    const currentOfficeAgeMs =
+      now.getTime() - currentOfficeReceivedAt.getTime();
+
+    const currentOfficeAgeDays = Math.max(
+      0,
+      Math.floor(currentOfficeAgeMs / (1000 * 60 * 60 * 24)),
+    );
+
+    // ===========================================================================
+    // DOCUMENT SUMMARY
+    // ===========================================================================
+
+    const documentSummary = {
+      id: document.id,
+
+      trackingNumber: document.trackingNumber,
+
+      title: document.title,
+
+      description: document.description,
+
+      referenceNumber: document.referenceNumber,
+
+      senderType: document.senderType,
+
+      senderName: document.senderName,
+
+      senderOrganization: document.senderOrganization,
+
+      senderContact: document.senderContact,
+
+      senderOffice: document.senderOffice,
+
+      addressee: document.addressee,
+
+      sourceClass: document.sourceClass,
+
+      internalSourceScope: document.internalSourceScope,
+
+      monitoringCategory: document.monitoringCategory,
+
+      routingProfile: document.routingProfile,
+
+      priority: document.priority,
+
+      classification: document.classification,
+
+      confidentialityLevel: document.confidentialityLevel,
+
+      deadline: document.deadline,
+
+      createdAt: document.createdAt,
+
+      currentStatus: document.currentStatus,
+
+      currentOffice: document.currentOffice,
+
+      responsibleOffice: document.responsibleOffice,
+
+      responsiblePerson: document.responsiblePerson,
+
+      totalAgeDays,
+
+      currentOfficeAgeDays,
+    };
+
+    // ===========================================================================
+    // ROUTING HISTORY
+    // ===========================================================================
+
     const routingHistory = document.routes.map((route, routeIndex) => {
       /*
-        |--------------------------------------------------------------------------
-        | FIND WHEN THE "FROM OFFICE" RECEIVED THE DOCUMENT
-        |--------------------------------------------------------------------------
-        |
-        | For example:
-        |
-        | Records -> ORD
-        |
-        | We need Records' received date here,
-        | NOT ORD's received date.
-        |
-        */
+       * FIND WHEN THE FROM OFFICE RECEIVED THE DOCUMENT
+       *
+       * Example:
+       *
+       * Records -> ORD
+       *
+       * For the route Records -> ORD, we need the date when Records
+       * received the document, not when ORD received it.
+       */
 
       const previousRoutes = document.routes.slice(0, routeIndex);
 
@@ -4764,41 +4997,30 @@ export class DocumentsService {
         );
 
       /*
-       * First/origin office has no
-       * previous incoming route.
-       *
-       * document.createdAt acts as
-       * its initial received/recorded time.
+       * First/origin office has no previous incoming route.
+       * Use document.createdAt as initial received/recorded time.
        */
+
       const dateReceived =
         previousIncoming?.receivedAt ??
         (routeIndex === 0 ? document.createdAt : null);
 
       /*
-        |--------------------------------------------------------------------------
-        | ACTIONS TAKEN WHILE DOCUMENT WAS IN FROM OFFICE
-        |--------------------------------------------------------------------------
-        */
+       * FIND ACTIONS TAKEN WHILE DOCUMENT WAS IN THE FROM OFFICE
+       */
 
       const officeActions = document.actions.filter((action) => {
+        // Action must belong to the office that released the document
         if (action.officeId !== route.fromOfficeId) {
           return false;
         }
 
-        /*
-         * Action must happen before
-         * this office released/routed
-         * the document.
-         */
+        // Action must happen before or at the release time
         if (action.createdAt > route.sentAt) {
           return false;
         }
 
-        /*
-         * If we know when the office
-         * received it, exclude actions
-         * from an earlier visit.
-         */
+        // Exclude actions from an earlier visit to the same office
         if (dateReceived && action.createdAt < dateReceived) {
           return false;
         }
@@ -4811,9 +5033,7 @@ export class DocumentsService {
 
         fromOffice: {
           id: route.fromOffice.id,
-
           officeCode: route.fromOffice.officeCode,
-
           officeName: route.fromOffice.officeName,
         },
 
@@ -4821,15 +5041,12 @@ export class DocumentsService {
 
         toOffice: {
           id: route.toOffice.id,
-
           officeCode: route.toOffice.officeCode,
-
           officeName: route.toOffice.officeName,
         },
 
         /*
-         * sentAt = when From Office
-         * released/routed the document.
+         * sentAt = when the FROM office released/routed the document.
          */
         dateReleased: route.sentAt,
 
@@ -4837,22 +5054,55 @@ export class DocumentsService {
 
         status: route.status,
 
-        actions: officeActions.map((action) => ({
-          id: action.id,
-
-          comment: action.comment,
-
-          fileName: action.fileName,
-
-          createdAt: action.createdAt,
-        })),
+        actions: officeActions.map(mapAction),
       };
     });
+
+    // ===========================================================================
+    // ALL ACTIONS
+    // ===========================================================================
+
+    const allActions = document.actions.map(mapAction);
+
+    // ===========================================================================
+    // INSTRUCTION GROUPS
+    // ===========================================================================
+
+    const instructions = {
+      red: document.actions
+        .filter(
+          (action) => getInstructionSection(action.office.officeCode) === 'RED',
+        )
+        .map(mapAction),
+
+      ard: document.actions
+        .filter(
+          (action) => getInstructionSection(action.office.officeCode) === 'ARD',
+        )
+        .map(mapAction),
+
+      division: document.actions
+        .filter(
+          (action) =>
+            getInstructionSection(action.office.officeCode) === 'DIVISION',
+        )
+        .map(mapAction),
+    };
+
+    // ===========================================================================
+    // FINAL RESPONSE
+    // ===========================================================================
 
     return {
       documentId: document.id,
 
       trackingNumber: document.trackingNumber,
+
+      document: documentSummary,
+
+      instructions,
+
+      allActions,
 
       routingHistory,
     };

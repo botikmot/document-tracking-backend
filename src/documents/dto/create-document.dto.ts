@@ -14,6 +14,8 @@ import {
   DocumentMonitoringCategory,
   DocumentSourceClass,
   InternalSourceScope,
+  DocumentClassification,
+  DocumentPriority,
 } from '@prisma/client';
 
 import { CreateDocumentAttachmentDto } from './create-document-attachment.dto';
@@ -34,16 +36,16 @@ export class CreateDocumentDto {
   referenceNumber?: string;
 
   @IsOptional()
-  @IsString()
-  priority?: string;
+  @IsEnum(DocumentPriority)
+  priority?: DocumentPriority;
 
   @IsOptional()
   @IsString()
   confidentialityLevel?: string;
 
   @IsOptional()
-  @IsString()
-  classification?: string;
+  @IsEnum(DocumentClassification)
+  classification?: DocumentClassification;
 
   @IsOptional()
   @IsDateString()
