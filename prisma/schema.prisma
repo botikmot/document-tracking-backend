@@ -240,9 +240,10 @@ model Office {
   clientServiceTypes ClientServiceType[]
   clientApplications ClientApplication[]
 
-  currentDocuments     Document[] @relation("CurrentOffice")
-  senderDocuments      Document[] @relation("SenderOffice")
-  responsibleDocuments Document[] @relation("ResponsibleOffice")
+  currentDocuments         Document[]               @relation("CurrentOffice")
+  senderDocuments          Document[]               @relation("SenderOffice")
+  responsibleDocuments     Document[]               @relation("ResponsibleOffice")
+  documentResponsibilities DocumentResponsibility[]
 
   sentRoutes     DocumentRoute[] @relation("FromOffice")
   receivedRoutes DocumentRoute[] @relation("ToOffice")
@@ -348,10 +349,11 @@ model Document {
 
   clientApplication ClientApplication?
 
-  attachments DocumentAttachment[]
-  actions     DocumentAction[]
-  routes      DocumentRoute[]
-  logs        DocumentLog[]
+  attachments      DocumentAttachment[]
+  actions          DocumentAction[]
+  routes           DocumentRoute[]
+  logs             DocumentLog[]
+  responsibilities DocumentResponsibility[]
 
   @@index([responsibleOfficeId])
   // NEW INDEXES
@@ -760,4 +762,27 @@ model DocumentTrackingCounter {
   lastNumber Int @default(0)
 
   updatedAt DateTime @updatedAt
+}
+
+/// One accountability assignment for a document.
+/// This is intentionally separate from DocumentRoute:
+/// assigning responsibility does not change document custody.
+model DocumentResponsibility {
+  id String @id @default(uuid())
+
+  documentId String
+  officeId   String
+
+  /// Free-text name, matching the existing responsiblePerson behavior.
+  responsiblePerson String?
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  office   Office   @relation(fields: [officeId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One responsibility assignment per office for a given document.
+  @@unique([documentId, officeId])
+  @@index([officeId])
 }

@@ -415,6 +415,16 @@ export class DocumentsService {
         addressee: dto.addressee,
         responsibleOfficeId: dto.responsibleOfficeId || null,
         responsiblePerson: dto.responsiblePerson?.trim() || null,
+        ...(dto.responsibleOfficeId
+          ? {
+              responsibilities: {
+                create: {
+                  officeId: dto.responsibleOfficeId,
+                  responsiblePerson: dto.responsiblePerson?.trim() || null,
+                },
+              },
+            }
+          : {}),
         createdById: currentUser.userId,
         senderType: dto.senderType,
         senderOfficeId:
@@ -449,6 +459,11 @@ export class DocumentsService {
         senderOffice: true,
         createdBy: true,
         attachments: true,
+        responsibilities: {
+          include: {
+            office: true,
+          },
+        },
       },
     });
 
@@ -567,6 +582,14 @@ export class DocumentsService {
           currentStatus: true,
           currentOffice: true,
           senderOffice: true,
+          responsibilities: {
+            include: {
+              office: true,
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
           createdBy: true,
           attachments: true,
           routes: {
@@ -624,6 +647,14 @@ export class DocumentsService {
         currentOffice: true,
         createdBy: true,
         attachments: true,
+        responsibilities: {
+          include: {
+            office: true,
+          },
+          orderBy: {
+            createdAt: 'asc',
+          },
+        },
         routes: {
           include: {
             fromOffice: true,
@@ -735,12 +766,41 @@ export class DocumentsService {
   |
   */
 
-    if (dto.responsibleOfficeId) {
+    if (dto.responsibleAssignments !== undefined) {
+      const assignmentOfficeIds = dto.responsibleAssignments.map(
+        (assignment) => assignment.officeId,
+      );
+
+      if (new Set(assignmentOfficeIds).size !== assignmentOfficeIds.length) {
+        throw new BadRequestException(
+          'An office can only be assigned once per document.',
+        );
+      }
+
+      if (assignmentOfficeIds.length > 0) {
+        const matchedOffices = await this.prisma.office.findMany({
+          where: {
+            id: {
+              in: assignmentOfficeIds,
+            },
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        if (matchedOffices.length !== assignmentOfficeIds.length) {
+          throw new BadRequestException(
+            'One or more responsible offices could not be found.',
+          );
+        }
+      }
+    } else if (dto.responsibleOfficeId) {
+      // Backward compatibility for older clients still sending the single-office fields.
       const responsibleOffice = await this.prisma.office.findUnique({
         where: {
           id: dto.responsibleOfficeId,
         },
-
         select: {
           id: true,
         },
@@ -750,6 +810,13 @@ export class DocumentsService {
         throw new BadRequestException('Responsible office not found');
       }
     }
+
+    const normalizedResponsibilityAssignments = dto.responsibleAssignments?.map(
+      (assignment) => ({
+        officeId: assignment.officeId,
+        responsiblePerson: assignment.responsiblePerson?.trim() || null,
+      }),
+    );
 
     /*
   |--------------------------------------------------------------------------
@@ -762,6 +829,7 @@ export class DocumentsService {
 
       responsibleOfficeId,
       responsiblePerson,
+      responsibleAssignments,
 
       sourceClass,
       internalSourceScope,
@@ -899,28 +967,53 @@ export class DocumentsService {
             |
             */
 
-          ...(responsibleOfficeId !== undefined && {
-            responsibleOfficeId: responsibleOfficeId || null,
-          }),
-
-          /*
-            |--------------------------------------------------------------------------
-            | Responsible Person
-            |--------------------------------------------------------------------------
-            |
-            | This is intentionally a plain string.
-            |
-            | undefined = do not modify existing value
-            | empty string = clear responsible person
-            | string = save responsible person's name
-            |
-            */
-
-          ...(responsiblePerson !== undefined && {
-            responsiblePerson: responsiblePerson?.trim() || null,
-          }),
+          ...(responsibleAssignments !== undefined
+            ? {
+                // Keep the former single-value columns synchronized for legacy screens.
+                responsibleOfficeId:
+                  normalizedResponsibilityAssignments?.[0]?.officeId ?? null,
+                responsiblePerson:
+                  normalizedResponsibilityAssignments?.[0]?.responsiblePerson ??
+                  null,
+              }
+            : {
+                ...(responsibleOfficeId !== undefined && {
+                  responsibleOfficeId: responsibleOfficeId || null,
+                }),
+                ...(responsiblePerson !== undefined && {
+                  responsiblePerson: responsiblePerson?.trim() || null,
+                }),
+              }),
         },
       });
+
+      /*
+        |--------------------------------------------------------------------------
+        | Replace Responsible Office / Person Assignments
+        |--------------------------------------------------------------------------
+        |
+        | The array is authoritative when supplied:
+        | [] removes all assignments; omitted means leave them unchanged.
+        |
+        */
+
+      if (responsibleAssignments !== undefined) {
+        await tx.documentResponsibility.deleteMany({
+          where: {
+            documentId: id,
+          },
+        });
+
+        if (normalizedResponsibilityAssignments?.length) {
+          await tx.documentResponsibility.createMany({
+            data: normalizedResponsibilityAssignments.map((assignment) => ({
+              documentId: id,
+              officeId: assignment.officeId,
+              responsiblePerson: assignment.responsiblePerson,
+            })),
+          });
+        }
+      }
 
       /*
         |--------------------------------------------------------------------------
@@ -1017,6 +1110,14 @@ export class DocumentsService {
           senderOffice: true,
 
           responsibleOffice: true,
+          responsibilities: {
+            include: {
+              office: true,
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
 
           createdBy: true,
 
@@ -1321,6 +1422,14 @@ export class DocumentsService {
               currentOffice: true,
               senderOffice: true,
               createdBy: true,
+              responsibilities: {
+                include: {
+                  office: true,
+                },
+                orderBy: {
+                  createdAt: 'asc',
+                },
+              },
             },
           },
 
@@ -1440,6 +1549,14 @@ export class DocumentsService {
               currentOffice: true,
               senderOffice: true,
               createdBy: true,
+              responsibilities: {
+                include: {
+                  office: true,
+                },
+                orderBy: {
+                  createdAt: 'asc',
+                },
+              },
 
               routes: {
                 include: {
@@ -1596,6 +1713,14 @@ export class DocumentsService {
           currentOffice: true,
           senderOffice: true,
           responsibleOffice: true,
+          responsibilities: {
+            include: {
+              office: true,
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
           attachments: true,
           createdBy: true,
 
@@ -1854,6 +1979,14 @@ export class DocumentsService {
           include: {
             documentType: true,
             currentStatus: true,
+            responsibilities: {
+              include: {
+                office: true,
+              },
+              orderBy: {
+                createdAt: 'asc',
+              },
+            },
           },
         },
 
@@ -1937,6 +2070,14 @@ export class DocumentsService {
           currentOffice: true,
           senderOffice: true,
           createdBy: true,
+          responsibilities: {
+            include: {
+              office: true,
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
           routes: {
             include: {
               fromOffice: true,
@@ -2265,6 +2406,15 @@ export class DocumentsService {
         },
 
         senderOffice: true,
+
+        responsibilities: {
+          include: {
+            office: true,
+          },
+          orderBy: {
+            createdAt: 'asc',
+          },
+        },
 
         routes: {
           include: {
@@ -3532,6 +3682,15 @@ export class DocumentsService {
           senderOffice: true,
 
           createdBy: true,
+
+          responsibilities: {
+            include: {
+              office: true,
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
 
           routes: {
             orderBy: {

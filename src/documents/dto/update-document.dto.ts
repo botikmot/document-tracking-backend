@@ -5,6 +5,10 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  ArrayMaxSize,
+  ValidateNested,
+  MaxLength,
+  ValidateIf,
 } from 'class-validator';
 
 import { Type } from 'class-transformer';
@@ -16,6 +20,17 @@ import {
   DocumentClassification,
   DocumentPriority,
 } from '@prisma/client';
+
+
+export class ResponsibleOfficeAssignmentDto {
+  @IsUUID()
+  officeId!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  responsiblePerson?: string;
+}
 
 export class UpdateDocumentDto {
   @IsOptional()
@@ -54,6 +69,18 @@ export class UpdateDocumentDto {
   @IsOptional()
   @IsString()
   responsiblePerson?: string;
+
+  /**
+   * When supplied, this array replaces the document's complete
+   * set of responsible office/person assignments.
+   * An empty array removes all assignments.
+   */
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => ResponsibleOfficeAssignmentDto)
+  responsibleAssignments?: ResponsibleOfficeAssignmentDto[];
 
   @IsOptional()
   @IsString()
