@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -18,6 +19,8 @@ import { PublicUpdateDocumentStatusDto } from './dto/public-update-document-stat
 import { CreateDocumentActionDto } from './dto/create-document-action.dto';
 import { UpdateDocumentActionDto } from './dto/update-document-action.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { PublicRouteDocumentDto } from './dto/public-route-document.dto';
+
 import {
   Prisma,
   DocumentMonitoringCategory,
@@ -5264,6 +5267,338 @@ export class DocumentsService {
       allActions,
 
       routingHistory,
+    };
+  }
+
+  /*
+|--------------------------------------------------------------------------
+| PUBLIC DOCUMENT ROUTING - EXTERNAL APPLICATION
+|--------------------------------------------------------------------------
+*/
+
+  async publicRouteDocument(dto: PublicRouteDocumentDto) {
+    /*
+  |--------------------------------------------------------------------------
+  | INTEGRATION USER
+  |--------------------------------------------------------------------------
+  |
+  | Must reference an existing eDATS User record.
+  |
+  */
+
+    const integrationUserId =
+      process.env.EDATS_EXTERNAL_INTEGRATION_USER_ID?.trim();
+
+    if (!integrationUserId) {
+      throw new InternalServerErrorException(
+        'External integration user is not configured.',
+      );
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | NORMALIZE REQUEST
+  |--------------------------------------------------------------------------
+  */
+
+    const trackingNumber = dto.trackingNumber.trim();
+
+    const receivingOfficeCode = dto.receivingOfficeCode.trim().toUpperCase();
+
+    const remarks = dto.remarks?.trim() || undefined;
+
+    /*
+  |--------------------------------------------------------------------------
+  | CREATE ROUTING TRANSACTION
+  |--------------------------------------------------------------------------
+  */
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      /*
+      |--------------------------------------------------------------------------
+      | VERIFY INTEGRATION USER
+      |--------------------------------------------------------------------------
+      */
+
+      const integrationUser = await tx.user.findUnique({
+        where: {
+          id: integrationUserId,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!integrationUser) {
+        throw new InternalServerErrorException(
+          'Configured integration user does not exist.',
+        );
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | FIND DOCUMENT
+      |--------------------------------------------------------------------------
+      */
+
+      const document = await tx.document.findUnique({
+        where: {
+          trackingNumber,
+        },
+        include: {
+          currentOffice: true,
+        },
+      });
+
+      if (!document) {
+        throw new NotFoundException(
+          `Document with tracking number ${trackingNumber} was not found.`,
+        );
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | FIND RECEIVING OFFICE
+      |--------------------------------------------------------------------------
+      */
+
+      const destinationOffice = await tx.office.findUnique({
+        where: {
+          officeCode: receivingOfficeCode,
+        },
+      });
+
+      if (!destinationOffice) {
+        throw new NotFoundException(
+          `Receiving office ${receivingOfficeCode} was not found.`,
+        );
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | PREVENT ROUTING TO SAME OFFICE
+      |--------------------------------------------------------------------------
+      */
+
+      if (document.currentOfficeId === destinationOffice.id) {
+        throw new BadRequestException(
+          'Document is already assigned to the receiving office.',
+        );
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | FIND IN TRANSIT STATUS
+      |--------------------------------------------------------------------------
+      */
+
+      const inTransitStatus = await tx.documentStatus.findUnique({
+        where: {
+          name: 'IN_TRANSIT',
+        },
+      });
+
+      if (!inTransitStatus) {
+        throw new NotFoundException('IN_TRANSIT status not found.');
+      }
+
+      const now = new Date();
+
+      /*
+      |--------------------------------------------------------------------------
+      | COMPLETE PREVIOUS RECEIVED ROUTE
+      |--------------------------------------------------------------------------
+      */
+
+      await tx.documentRoute.updateMany({
+        where: {
+          documentId: document.id,
+
+          toOfficeId: document.currentOfficeId,
+
+          status: 'RECEIVED',
+
+          completedAt: null,
+        },
+
+        data: {
+          status: 'COMPLETED',
+
+          completedAt: now,
+        },
+      });
+
+      /*
+      |--------------------------------------------------------------------------
+      | CREATE DOCUMENT ROUTE
+      |--------------------------------------------------------------------------
+      */
+
+      const route = await tx.documentRoute.create({
+        data: {
+          documentId: document.id,
+
+          fromOfficeId: document.currentOfficeId,
+
+          toOfficeId: destinationOffice.id,
+
+          sentByUserId: integrationUser.id,
+
+          remarks,
+
+          // RouteStatus defaults to PENDING.
+        },
+
+        include: {
+          fromOffice: true,
+          toOffice: true,
+          sentBy: true,
+        },
+      });
+
+      /*
+      |--------------------------------------------------------------------------
+      | UPDATE DOCUMENT OFFICE AND STATUS
+      |--------------------------------------------------------------------------
+      */
+
+      const updatedDocument = await tx.document.update({
+        where: {
+          id: document.id,
+        },
+
+        data: {
+          currentOfficeId: destinationOffice.id,
+
+          currentStatusId: inTransitStatus.id,
+        },
+
+        include: {
+          currentOffice: true,
+          currentStatus: true,
+        },
+      });
+
+      /*
+      |--------------------------------------------------------------------------
+      | CREATE AUDIT LOG
+      |--------------------------------------------------------------------------
+      */
+
+      await tx.documentLog.create({
+        data: {
+          documentId: document.id,
+
+          userId: integrationUser.id,
+
+          action: 'DOCUMENT_ROUTED',
+
+          description: `Document routed through external integration from ${document.currentOffice.officeName} to ${destinationOffice.officeName}.`,
+        },
+      });
+
+      /*
+      |--------------------------------------------------------------------------
+      | CREATE DATABASE NOTIFICATIONS
+      |--------------------------------------------------------------------------
+      */
+
+      const destinationUsers = await tx.officeUser.findMany({
+        where: {
+          officeId: destinationOffice.id,
+        },
+        select: {
+          userId: true,
+        },
+      });
+
+      const notifications = await Promise.all(
+        destinationUsers.map(async (officeUser) => {
+          const notification = await tx.notification.create({
+            data: {
+              userId: officeUser.userId,
+
+              title: 'New Incoming Document',
+
+              message: `${document.title} has been routed to your office.`,
+
+              documentId: document.id,
+
+              type: 'ROUTED',
+            },
+          });
+
+          return {
+            userId: officeUser.userId,
+            notification,
+          };
+        }),
+      );
+
+      return {
+        route,
+        updatedDocument,
+        notifications,
+      };
+    });
+
+    /*
+  |--------------------------------------------------------------------------
+  | SEND REALTIME NOTIFICATIONS
+  |--------------------------------------------------------------------------
+  */
+
+    for (const item of result.notifications) {
+      this.notificationsGateway.sendNotification(
+        item.userId,
+        item.notification,
+      );
+
+      this.notificationsGateway.sendIncomingDocument(item.userId, {
+        id: result.route.id,
+
+        status: result.route.status,
+
+        remarks: result.route.remarks,
+
+        sentAt: result.route.sentAt,
+
+        fromOffice: result.route.fromOffice,
+
+        toOffice: result.route.toOffice,
+
+        sentBy: result.route.sentBy,
+
+        document: result.updatedDocument,
+      });
+    }
+
+    /*
+  |--------------------------------------------------------------------------
+  | SUCCESS RESPONSE
+  |--------------------------------------------------------------------------
+  */
+
+    return {
+      success: true,
+
+      message: 'Document routed successfully.',
+
+      data: {
+        trackingNumber: result.updatedDocument.trackingNumber,
+
+        routeId: result.route.id,
+
+        fromOffice: result.route.fromOffice.officeName,
+
+        receivingOffice: result.route.toOffice.officeName,
+
+        routeStatus: result.route.status,
+
+        documentStatus: result.updatedDocument.currentStatus.name,
+
+        sentAt: result.route.sentAt,
+      },
     };
   }
 }
